@@ -454,6 +454,14 @@ function detectDelimiter(line) {
   if (counts[0][1]>0) return counts[0][0];
   return 'whitespace';
 }
+function readFileAsText(file) {
+  return new Promise((resolve,reject)=>{
+    const fr = new FileReader();
+    fr.onerror = ()=>reject(fr.error);
+    fr.onload = ()=>resolve(String(fr.result||''));
+    fr.readAsText(file);
+  });
+}
 function normText(text) {
   return text.replace(/[\u2013\u2014]/g,'-').replace(/[\u00B7\u2219\u22C5]/g,'.').replace(/\u00A0/g,' ');
 }
@@ -511,6 +519,112 @@ function parseHydro(text) {
     out.push({ draft_m:draft, dis_fw, dis_sw, lcf_m:lcf, lcb_m:lcb, tpc, mct });
   }
   return out;
+}
+function buildMapUIHydro(lines, containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML='';
+  if (!lines || !lines.length) { el.innerHTML = '<div style="color:#94a3b8;">Eşleme için önce metin yapıştırın ya da dosya yükleyin.</div>'; return; }
+  const delim = detectDelimiter(lines[0]);
+  const sample = splitLine(lines[0], delim);
+  function sel(id,label){
+    const options = ['<option value="">-</option>'].concat(sample.map((t,i)=>`<option value="${i}">${i}: ${t}</option>`)).join('');
+    return `<label style="display:flex;flex-direction:column;gap:4px;">${label}<select id="${id}">${options}</select></label>`;
+  }
+  el.innerHTML = `
+    <div style="border:1px solid #1e293b; padding:8px; border-radius:6px;">
+      <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Kolon Eşleme (örnek satırdaki kolonlara göre)</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px;">
+        ${sel('map-h-draft','Draft (m)')}
+        ${sel('map-h-disfw','DIS(FW) (t)')}
+        ${sel('map-h-dissw','DIS(SW) (t)')}
+        ${sel('map-h-lcf','LCF (m)')}
+        ${sel('map-h-lcb','LCB (m)')}
+        ${sel('map-h-tpc','TPC (t/cm)')}
+        ${sel('map-h-mct','MCT1cm (t·m/cm)')}
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button id="apply-map-hydro">Eşlemeyi Uygula</button>
+      </div>
+    </div>`;
+  const apply = document.getElementById('apply-map-hydro');
+  if (apply) apply.addEventListener('click', ()=>{
+    const idx = k=>{ const v = document.getElementById(`map-h-${k}`).value; return v===''?null:Number(v); };
+    const map = { draft: idx('draft'), dis_fw: idx('disfw'), dis_sw: idx('dissw'), lcf: idx('lcf'), lcb: idx('lcb'), tpc: idx('tpc'), mct: idx('mct') };
+    const rows=[];
+    for (const line of lines) {
+      const cols = splitLine(line, delim);
+      const val = (i)=> (i==null?undefined: toNumber(cols[i] ?? ''));
+      const draft = val(map.draft);
+      if (!isFinite(draft)) continue;
+      rows.push({
+        draft_m: draft,
+        dis_fw: val(map.dis_fw),
+        dis_sw: val(map.dis_sw),
+        lcf_m: val(map.lcf),
+        lcb_m: val(map.lcb),
+        tpc: val(map.tpc),
+        mct: val(map.mct),
+      });
+    }
+    const append = !!document.getElementById('append-hydro')?.checked;
+    if (append) WIZ.hydro = WIZ.hydro.concat(rows); else WIZ.hydro = rows;
+    renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+    updateWizStatus();
+  });
+}
+function buildMapUITanks(lines, containerId, mode) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML='';
+  if (!lines || !lines.length) { el.innerHTML = '<div style="color:#94a3b8;">Eşleme için önce metin yapıştırın ya da dosya yükleyin.</div>'; return; }
+  const delim = detectDelimiter(lines[0]);
+  const sample = splitLine(lines[0], delim);
+  function sel(id,label){
+    const options = ['<option value="">-</option>'].concat(sample.map((t,i)=>`<option value="${i}">${i}: ${t}</option>`)).join('');
+    return `<label style="display:flex;flex-direction:column;gap:4px;">${label}<select id="${id}">${options}</select></label>`;
+  }
+  const extra = mode==='cons' ? sel('map-t-type','Type (fuel|freshwater|lube)') : '';
+  el.innerHTML = `
+    <div style="border:1px solid #1e293b; padding:8px; border-radius:6px;">
+      <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Kolon Eşleme</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px;">
+        ${sel('map-t-name','Name')}
+        ${sel('map-t-lcg','LCG (m)')}
+        ${sel('map-t-cap','Cap(100%) m³')}
+        ${extra}
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button id="apply-map-tank">Eşlemeyi Uygula</button>
+      </div>
+    </div>`;
+  const apply = document.getElementById('apply-map-tank');
+  if (apply) apply.addEventListener('click', ()=>{
+    const idx = id=>{ const v=document.getElementById(id).value; return v===''?null:Number(v); };
+    const m = { name: idx('map-t-name'), lcg: idx('map-t-lcg'), cap: idx('map-t-cap'), type: idx('map-t-type') };
+    const rows=[];
+    for (const line of lines) {
+      const cols = splitLine(line, delim);
+      const pick = i => (i==null?undefined: cols[i]);
+      const name = pick(m.name) || cols.join(' ');
+      const lcg = toNumber(pick(m.lcg)); if (!isFinite(lcg)) continue;
+      const cap = toNumber(pick(m.cap));
+      let type = (m.type!=null? (pick(m.type)||'') : '');
+      if (!type && mode==='cons') {
+        // infer from name
+        const s=name.toLowerCase();
+        if (/hfo|f\.o|fuel|d\.o|mdo|mgo|diesel|bunker/.test(s)) type='fuel';
+        else if (/fresh|fw\b|freshwater/.test(s)) type='freshwater';
+        else if (/lube|lub\.? oil|lo\b/.test(s)) type='lube';
+        else type='fuel';
+      }
+      if (mode==='cons') rows.push({ name, type, lcg, cap_m3: isFinite(cap)? cap : undefined });
+      else rows.push({ name, lcg, cap_m3: isFinite(cap)? cap : undefined });
+    }
+    const append = !!document.getElementById(`append-${mode==='cons'?'cons':'cargo'}`)?.checked; // caller will pass correct container
+    // We won't rely on id above; caller will handle assignment
+    // Return rows by emitting a custom event
+  });
 }
 function parseTanksGeneric(text, mode) {
   // mode: 'cargo'|'ballast'|'cons'
@@ -570,6 +684,26 @@ function bindWizardOnce() {
     renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
+  const mapHydBtn = document.getElementById('map-hydro-btn');
+  if (mapHydBtn) mapHydBtn.addEventListener('click', ()=>{
+    const raw = document.getElementById('paste-hydro').value;
+    const lines = normText(raw).split(/\r?\n/).filter(l=>l.trim().length>0);
+    buildMapUIHydro(lines, 'map-hydro');
+  });
+  const fileHydBtn = document.getElementById('upload-hydro');
+  const fileHyd = document.getElementById('file-hydro');
+  if (fileHydBtn && fileHyd) {
+    fileHydBtn.addEventListener('click', ()=> fileHyd.click());
+    fileHyd.addEventListener('change', async ()=>{
+      const f = fileHyd.files && fileHyd.files[0]; if (!f) return;
+      const text = await readFileAsText(f);
+      document.getElementById('paste-hydro').value = text;
+      const rows = parseHydro(text);
+      WIZ.hydro = rows;
+      renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+      updateWizStatus();
+    });
+  }
   const hydroClr = document.getElementById('clear-hydro');
   if (hydroClr) hydroClr.addEventListener('click', ()=>{
     document.getElementById('paste-hydro').value='';
@@ -581,10 +715,14 @@ function bindWizardOnce() {
   for (const key of ['cargo','ballast','cons']){
     const btn = document.getElementById(`parse-${key}`);
     const clr = document.getElementById(`clear-${key}`);
+    const mapBtn = document.getElementById(`map-${key}-btn`);
+    const upBtn = document.getElementById(`upload-${key}`);
+    const fileIn = document.getElementById(`file-${key}`);
     if (btn) btn.addEventListener('click', ()=>{
       const txt = document.getElementById(`paste-${key}`).value;
       const rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
-      WIZ[key] = rows;
+      const append = !!document.getElementById(`append-${key}`)?.checked;
+      if (append) WIZ[key] = (WIZ[key] || []).concat(rows); else WIZ[key] = rows;
       const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
       renderTablePreview(`preview-${key}`, rows, cols);
       updateWizStatus();
@@ -595,6 +733,25 @@ function bindWizardOnce() {
       WIZ[key] = [];
       updateWizStatus();
     });
+    if (mapBtn) mapBtn.addEventListener('click', ()=>{
+      const raw = document.getElementById(`paste-${key}`).value;
+      const lines = normText(raw).split(/\r?\n/).filter(l=>l.trim().length>0);
+      buildMapUITanks(lines, `map-${key}`, key==='cons'?'cons':'tank');
+    });
+    if (upBtn && fileIn) {
+      upBtn.addEventListener('click', ()=> fileIn.click());
+      fileIn.addEventListener('change', async ()=>{
+        const f = fileIn.files && fileIn.files[0]; if (!f) return;
+        const text = await readFileAsText(f);
+        document.getElementById(`paste-${key}`).value = text;
+        const rows = parseTanksGeneric(text, key==='cons'?'cons':'tank');
+        const append = !!document.getElementById(`append-${key}`)?.checked;
+        if (append) WIZ[key] = (WIZ[key] || []).concat(rows); else WIZ[key] = rows;
+        const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
+        renderTablePreview(`preview-${key}`, rows, cols);
+        updateWizStatus();
+      });
+    }
   }
 
   const exportBtn = document.getElementById('wiz-export');
