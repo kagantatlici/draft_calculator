@@ -404,22 +404,34 @@ if (shipSel) {
 }
 // Import wizard logic (basic paste-based parser)
 const addShipBtn = document.getElementById('add-ship');
-const overlay = document.getElementById('wizard-overlay');
-const closeBtn = document.getElementById('wizard-close');
-const tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
-const panes = {
-  hydro: document.getElementById('tab-hydro'),
-  cargo: document.getElementById('tab-cargo'),
-  ballast: document.getElementById('tab-ballast'),
-  cons: document.getElementById('tab-cons'),
-};
-const WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
+let WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
+let WIZ_BOUND = false;
 
-function showWizard() { if (overlay) overlay.style.display = 'block'; activateTab('hydro'); updateWizStatus(); }
-function hideWizard() { if (overlay) overlay.style.display = 'none'; }
+function showWizard() {
+  const ov = document.getElementById('wizard-overlay');
+  if (!ov) { alert('İçe aktarma sihirbazı yüklenemedi.'); return; }
+  ov.style.display = 'block';
+  if (!WIZ_BOUND) bindWizardOnce();
+  activateTab('hydro');
+  updateWizStatus();
+}
+function hideWizard() {
+  const ov = document.getElementById('wizard-overlay');
+  if (ov) ov.style.display = 'none';
+}
+function getTabButtons() { return Array.from(document.querySelectorAll('.tab-btn')); }
+function getPanes() {
+  return {
+    hydro: document.getElementById('tab-hydro'),
+    cargo: document.getElementById('tab-cargo'),
+    ballast: document.getElementById('tab-ballast'),
+    cons: document.getElementById('tab-cons'),
+  };
+}
 function activateTab(id) {
-  for (const [k, el] of Object.entries(panes)) { el.style.display = (k===id ? 'block' : 'none'); }
-  for (const b of tabBtns) { b.classList.toggle('active', b.dataset.tab===id); }
+  const panes = getPanes();
+  for (const [k, el] of Object.entries(panes)) { if (el) el.style.display = (k===id ? 'block' : 'none'); }
+  for (const b of getTabButtons()) { b.classList.toggle('active', b.dataset.tab===id); }
 }
 function updateWizStatus() {
   const s = document.getElementById('wiz-status');
@@ -432,10 +444,7 @@ function updateWizStatus() {
   ].join(' • ');
   s.textContent = counts;
 }
-
 if (addShipBtn) addShipBtn.addEventListener('click', showWizard);
-if (closeBtn) closeBtn.addEventListener('click', hideWizard);
-for (const b of tabBtns) b.addEventListener('click', () => activateTab(b.dataset.tab));
 
 // Helpers for parsing
 function detectDelimiter(line) {
@@ -547,40 +556,76 @@ function renderTablePreview(elm, rows, cols) {
   const body = rows.slice(0,10).map(r=> `<tr>${cols.map(c=>`<td style=\"padding:4px;\">${r[c] ?? ''}</td>`).join('')}</tr>` ).join('');
   el.innerHTML = `<div style=\"font-size:12px;color:#9fb3c8;margin-bottom:6px;\">Toplam ${rows.length} satır</div><table style=\"width:100%;border-collapse:collapse;\">${head}${body}</table>`;
 }
+function bindWizardOnce() {
+  WIZ_BOUND = true;
+  const closeBtn = document.getElementById('wizard-close');
+  if (closeBtn) closeBtn.addEventListener('click', hideWizard);
+  for (const b of getTabButtons()) b.addEventListener('click', () => activateTab(b.dataset.tab));
 
-// Hook parsers to buttons
-const hydroBtn = document.getElementById('parse-hydro');
-if (hydroBtn) hydroBtn.addEventListener('click', ()=>{
-  const txt = document.getElementById('paste-hydro').value;
-  const rows = parseHydro(txt);
-  WIZ.hydro = rows;
-  renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
-  updateWizStatus();
-});
-const hydroClr = document.getElementById('clear-hydro');
-if (hydroClr) hydroClr.addEventListener('click', ()=>{
-  document.getElementById('paste-hydro').value='';
-  document.getElementById('preview-hydro').innerHTML='';
-  WIZ.hydro = [];
-  updateWizStatus();
-});
-
-for (const key of ['cargo','ballast','cons']){
-  const btn = document.getElementById(`parse-${key}`);
-  const clr = document.getElementById(`clear-${key}`);
-  if (btn) btn.addEventListener('click', ()=>{
-    const txt = document.getElementById(`paste-${key}`).value;
-    const rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
-    WIZ[key] = rows;
-    const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
-    renderTablePreview(`preview-${key}`, rows, cols);
+  const hydroBtn = document.getElementById('parse-hydro');
+  if (hydroBtn) hydroBtn.addEventListener('click', ()=>{
+    const txt = document.getElementById('paste-hydro').value;
+    const rows = parseHydro(txt);
+    WIZ.hydro = rows;
+    renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
-  if (clr) clr.addEventListener('click', ()=>{
-    document.getElementById(`paste-${key}`).value='';
-    document.getElementById(`preview-${key}`).innerHTML='';
-    WIZ[key] = [];
+  const hydroClr = document.getElementById('clear-hydro');
+  if (hydroClr) hydroClr.addEventListener('click', ()=>{
+    document.getElementById('paste-hydro').value='';
+    document.getElementById('preview-hydro').innerHTML='';
+    WIZ.hydro = [];
     updateWizStatus();
+  });
+
+  for (const key of ['cargo','ballast','cons']){
+    const btn = document.getElementById(`parse-${key}`);
+    const clr = document.getElementById(`clear-${key}`);
+    if (btn) btn.addEventListener('click', ()=>{
+      const txt = document.getElementById(`paste-${key}`).value;
+      const rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
+      WIZ[key] = rows;
+      const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
+      renderTablePreview(`preview-${key}`, rows, cols);
+      updateWizStatus();
+    });
+    if (clr) clr.addEventListener('click', ()=>{
+      document.getElementById(`paste-${key}`).value='';
+      document.getElementById(`preview-${key}`).innerHTML='';
+      WIZ[key] = [];
+      updateWizStatus();
+    });
+  }
+
+  const exportBtn = document.getElementById('wiz-export');
+  if (exportBtn) exportBtn.addEventListener('click', ()=>{
+    const js = buildShipJsonFromWizard();
+    const fn = `${js.ship.id||'new_ship'}.json`;
+    download(fn, JSON.stringify(js,null,2));
+  });
+
+  const activateBtn = document.getElementById('wiz-activate');
+  if (activateBtn) activateBtn.addEventListener('click', async ()=>{
+    const js = buildShipJsonFromWizard();
+    // Activate in-memory without saving to server
+    SHIP_ACTIVE = {
+      LBP: js.ship.lbp ?? SHIP.LBP,
+      LCF: SHIP.LCF,
+      TPC: SHIP.TPC,
+      MCT1cm: SHIP.MCT1cm,
+      RHO_REF: js.ship.rho_ref ?? SHIP.RHO_REF,
+    };
+    window.LIGHT_SHIP = js.ship.light_ship || window.LIGHT_SHIP;
+    HYDRO_ROWS = (js.hydrostatics.rows||[]).sort((a,b)=>a.draft_m-b.draft_m);
+    ACTIVE = {
+      cargo: (js.tanks.cargo||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+      ballast: (js.tanks.ballast||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+    };
+    CONS_TANKS = (js.tanks.consumables||[]).map(t=>({ name: t.name, type: t.type, lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
+    buildTankInputs('cargo-tanks', ACTIVE.cargo);
+    buildTankInputs('ballast-tanks', ACTIVE.ballast);
+    renderConstants();
+    hideWizard();
   });
 }
 
@@ -625,33 +670,4 @@ function download(filename, text) {
   document.body.removeChild(a);
 }
 
-const exportBtn = document.getElementById('wiz-export');
-if (exportBtn) exportBtn.addEventListener('click', ()=>{
-  const js = buildShipJsonFromWizard();
-  const fn = `${js.ship.id||'new_ship'}.json`;
-  download(fn, JSON.stringify(js,null,2));
-});
-
-const activateBtn = document.getElementById('wiz-activate');
-if (activateBtn) activateBtn.addEventListener('click', async ()=>{
-  const js = buildShipJsonFromWizard();
-  // Activate in-memory without saving to server
-  SHIP_ACTIVE = {
-    LBP: js.ship.lbp ?? SHIP.LBP,
-    LCF: SHIP.LCF,
-    TPC: SHIP.TPC,
-    MCT1cm: SHIP.MCT1cm,
-    RHO_REF: js.ship.rho_ref ?? SHIP.RHO_REF,
-  };
-  window.LIGHT_SHIP = js.ship.light_ship || window.LIGHT_SHIP;
-  HYDRO_ROWS = (js.hydrostatics.rows||[]).sort((a,b)=>a.draft_m-b.draft_m);
-  ACTIVE = {
-    cargo: (js.tanks.cargo||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
-    ballast: (js.tanks.ballast||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
-  };
-  CONS_TANKS = (js.tanks.consumables||[]).map(t=>({ name: t.name, type: t.type, lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
-  buildTankInputs('cargo-tanks', ACTIVE.cargo);
-  buildTankInputs('ballast-tanks', ACTIVE.ballast);
-  renderConstants();
-  hideWizard();
-});
+// (export/activate handlers are bound lazily when wizard opens)
