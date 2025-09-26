@@ -402,9 +402,256 @@ if (shipSel) {
     await activateShip(id);
   });
 }
+// Import wizard logic (basic paste-based parser)
 const addShipBtn = document.getElementById('add-ship');
-if (addShipBtn) {
-  addShipBtn.addEventListener('click', () => {
-    alert('Gemi ekleme sihirbazı yakında: Şimdilik JSON profil dosyasıyla ekleniyor (data/ships/*.json).');
+const overlay = document.getElementById('wizard-overlay');
+const closeBtn = document.getElementById('wizard-close');
+const tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
+const panes = {
+  hydro: document.getElementById('tab-hydro'),
+  cargo: document.getElementById('tab-cargo'),
+  ballast: document.getElementById('tab-ballast'),
+  cons: document.getElementById('tab-cons'),
+};
+const WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
+
+function showWizard() { if (overlay) overlay.style.display = 'block'; activateTab('hydro'); updateWizStatus(); }
+function hideWizard() { if (overlay) overlay.style.display = 'none'; }
+function activateTab(id) {
+  for (const [k, el] of Object.entries(panes)) { el.style.display = (k===id ? 'block' : 'none'); }
+  for (const b of tabBtns) { b.classList.toggle('active', b.dataset.tab===id); }
+}
+function updateWizStatus() {
+  const s = document.getElementById('wiz-status');
+  if (!s) return;
+  const counts = [
+    `Hydro: ${WIZ.hydro.length}`,
+    `Cargo: ${WIZ.cargo.length}`,
+    `Ballast: ${WIZ.ballast.length}`,
+    `Cons: ${WIZ.cons.length}`,
+  ].join(' • ');
+  s.textContent = counts;
+}
+
+if (addShipBtn) addShipBtn.addEventListener('click', showWizard);
+if (closeBtn) closeBtn.addEventListener('click', hideWizard);
+for (const b of tabBtns) b.addEventListener('click', () => activateTab(b.dataset.tab));
+
+// Helpers for parsing
+function detectDelimiter(line) {
+  if (line.includes('\t')) return '\t';
+  const counts = [',',';','|'].map(ch => [ch, (line.split(ch).length-1)]);
+  counts.sort((a,b)=>b[1]-a[1]);
+  if (counts[0][1]>0) return counts[0][0];
+  return 'whitespace';
+}
+function normText(text) {
+  return text.replace(/[\u2013\u2014]/g,'-').replace(/[\u00B7\u2219\u22C5]/g,'.').replace(/\u00A0/g,' ');
+}
+function toNumber(s) {
+  if (typeof s !== 'string') return Number(s);
+  let t = s.trim();
+  // convert 1.234,56 or 1,234.56 to 1234.56
+  const hasComma = t.includes(',');
+  const hasDot = t.includes('.');
+  if (hasComma && hasDot) {
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g,'').replace(',', '.');
+    else t = t.replace(/,/g,'');
+  } else if (hasComma && !hasDot) {
+    t = t.replace(',','.');
+  }
+  const n = Number(t);
+  return isFinite(n) ? n : NaN;
+}
+function splitLine(line, delim) {
+  if (delim==='\\t') return line.split('\t');
+  if (delim==='whitespace') return line.trim().split(/\s+/);
+  return line.split(delim);
+}
+function parseHydro(text) {
+  const out = [];
+  const lines = normText(text).split(/\r?\n/).filter(l=>l.trim().length>0);
+  if (!lines.length) return out;
+  const delim = detectDelimiter(lines[0]);
+  // try to find header: pick first line with any keyword
+  const keyRe = /(draft|dis\s*\(?(fw|sw)\)?|lcf|lcb|tpc|mct)/i;
+  let headerIdx = lines.findIndex(l=> keyRe.test(l));
+  if (headerIdx<0) headerIdx = 0;
+  const header = splitLine(lines[headerIdx], delim).map(x=>x.trim().toLowerCase());
+  const map = { draft:-1, dis_fw:-1, dis_sw:-1, lcf:-1, lcb:-1, tpc:-1, mct:-1 };
+  header.forEach((h,i)=>{
+    if (map.draft<0 && /draft/.test(h)) map.draft=i;
+    if (map.dis_fw<0 && /(dis.*fw|fw\b)/.test(h)) map.dis_fw=i;
+    if (map.dis_sw<0 && /(dis.*sw|sw\b)/.test(h)) map.dis_sw=i;
+    if (map.lcf<0 && /lcf/.test(h)) map.lcf=i;
+    if (map.lcb<0 && /lcb/.test(h)) map.lcb=i;
+    if (map.tpc<0 && /tpc/.test(h)) map.tpc=i;
+    if (map.mct<0 && /mct/.test(h)) map.mct=i;
+  });
+  for (let i=headerIdx+1;i<lines.length;i++){
+    const cols = splitLine(lines[i], delim);
+    const get = idx => (idx>=0 && idx<cols.length) ? cols[idx] : '';
+    const draft = toNumber(get(map.draft>=0?map.draft:0));
+    if (!isFinite(draft)) continue;
+    const dis_fw = isFinite(toNumber(get(map.dis_fw))) ? toNumber(get(map.dis_fw)) : undefined;
+    const dis_sw = isFinite(toNumber(get(map.dis_sw))) ? toNumber(get(map.dis_sw)) : undefined;
+    const lcf = toNumber(get(map.lcf));
+    const lcb = toNumber(get(map.lcb));
+    const tpc = toNumber(get(map.tpc));
+    const mct = toNumber(get(map.mct));
+    out.push({ draft_m:draft, dis_fw, dis_sw, lcf_m:lcf, lcb_m:lcb, tpc, mct });
+  }
+  return out;
+}
+function parseTanksGeneric(text, mode) {
+  // mode: 'cargo'|'ballast'|'cons'
+  const out = [];
+  const lines = normText(text).split(/\r?\n/);
+  const typeFromName = (name) => {
+    const s = name.toLowerCase();
+    if (/hfo|f\.o|fuel|d\.o|mdo|mgo|diesel|bunker/.test(s)) return 'fuel';
+    if (/fresh|fw\b|freshwater/.test(s)) return 'freshwater';
+    if (/lube|lub\.? oil|lo\b/.test(s)) return 'lube';
+    return 'fuel';
+  };
+  for (const raw of lines) {
+    const l = raw.trim(); if (!l) continue;
+    // split into tokens, take last 1-2 numbers as lcg/cap if present
+    const nums = (l.match(/[-+]?\d*\.?\d+/g)||[]).map(toNumber);
+    let name = l;
+    let lcg = NaN, cap = null;
+    if (nums.length>=1) {
+      lcg = nums[nums.length-1];
+      // if there is a second to last and it's much bigger, treat as cap
+      if (nums.length>=2 && Math.abs(nums[nums.length-2])>50) cap = nums[nums.length-2];
+      // cut name before numbers start
+      const idx = l.search(/[-+]?\d/);
+      if (idx>0) name = l.slice(0, idx).trim();
+    }
+    if (!isFinite(lcg)) continue;
+    if (mode==='cons') {
+      const tp = typeFromName(name);
+      out.push({ name, type: tp, lcg, cap_m3: cap });
+    } else {
+      out.push({ name, lcg, cap_m3: cap });
+    }
+  }
+  return out;
+}
+
+function renderTablePreview(elm, rows, cols) {
+  const el = document.getElementById(elm);
+  if (!el) return;
+  if (!rows || !rows.length) { el.innerHTML = '<div style="color:#94a3b8;">Veri yok</div>'; return; }
+  const head = `<tr>${cols.map(c=>`<th style=\"text-align:left;padding:4px;\">${c}</th>`).join('')}</tr>`;
+  const body = rows.slice(0,10).map(r=> `<tr>${cols.map(c=>`<td style=\"padding:4px;\">${r[c] ?? ''}</td>`).join('')}</tr>` ).join('');
+  el.innerHTML = `<div style=\"font-size:12px;color:#9fb3c8;margin-bottom:6px;\">Toplam ${rows.length} satır</div><table style=\"width:100%;border-collapse:collapse;\">${head}${body}</table>`;
+}
+
+// Hook parsers to buttons
+const hydroBtn = document.getElementById('parse-hydro');
+if (hydroBtn) hydroBtn.addEventListener('click', ()=>{
+  const txt = document.getElementById('paste-hydro').value;
+  const rows = parseHydro(txt);
+  WIZ.hydro = rows;
+  renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+  updateWizStatus();
+});
+const hydroClr = document.getElementById('clear-hydro');
+if (hydroClr) hydroClr.addEventListener('click', ()=>{
+  document.getElementById('paste-hydro').value='';
+  document.getElementById('preview-hydro').innerHTML='';
+  WIZ.hydro = [];
+  updateWizStatus();
+});
+
+for (const key of ['cargo','ballast','cons']){
+  const btn = document.getElementById(`parse-${key}`);
+  const clr = document.getElementById(`clear-${key}`);
+  if (btn) btn.addEventListener('click', ()=>{
+    const txt = document.getElementById(`paste-${key}`).value;
+    const rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
+    WIZ[key] = rows;
+    const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
+    renderTablePreview(`preview-${key}`, rows, cols);
+    updateWizStatus();
+  });
+  if (clr) clr.addEventListener('click', ()=>{
+    document.getElementById(`paste-${key}`).value='';
+    document.getElementById(`preview-${key}`).innerHTML='';
+    WIZ[key] = [];
+    updateWizStatus();
   });
 }
+
+function buildShipJsonFromWizard() {
+  const name = document.getElementById('wiz-name').value.trim() || 'NEW SHIP';
+  const id = document.getElementById('wiz-id').value.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  const lbp = toNumber(document.getElementById('wiz-lbp').value);
+  const rho = toNumber(document.getElementById('wiz-rho').value);
+  const lsw = toNumber(document.getElementById('wiz-ls-w').value);
+  const lsx = toNumber(document.getElementById('wiz-ls-x').value);
+  const cargo = WIZ.cargo.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
+  const ballast = WIZ.ballast.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
+  const cons = WIZ.cons.map(t=>({ name:t.name, type:t.type, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
+  const hydro = WIZ.hydro.map(r=>({
+    draft_m: r.draft_m,
+    dis_fw: r.dis_fw,
+    dis_sw: r.dis_sw,
+    lcf_m: r.lcf_m,
+    lcb_m: r.lcb_m,
+    tpc: r.tpc,
+    mct: r.mct,
+  }));
+  return {
+    ship: {
+      id, name,
+      lbp: isFinite(lbp) ? lbp : SHIP.LBP,
+      rho_ref: isFinite(rho) ? rho : SHIP.RHO_REF,
+      light_ship: (isFinite(lsw) && isFinite(lsx)) ? { weight: lsw, lcg: lsx } : undefined,
+    },
+    hydrostatics: { rows: hydro },
+    tanks: { cargo, ballast, consumables: cons },
+  };
+}
+
+function download(filename, text) {
+  const a = document.createElement('a');
+  a.setAttribute('href', 'data:application/json;charset=utf-8,' + encodeURIComponent(text));
+  a.setAttribute('download', filename);
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+const exportBtn = document.getElementById('wiz-export');
+if (exportBtn) exportBtn.addEventListener('click', ()=>{
+  const js = buildShipJsonFromWizard();
+  const fn = `${js.ship.id||'new_ship'}.json`;
+  download(fn, JSON.stringify(js,null,2));
+});
+
+const activateBtn = document.getElementById('wiz-activate');
+if (activateBtn) activateBtn.addEventListener('click', async ()=>{
+  const js = buildShipJsonFromWizard();
+  // Activate in-memory without saving to server
+  SHIP_ACTIVE = {
+    LBP: js.ship.lbp ?? SHIP.LBP,
+    LCF: SHIP.LCF,
+    TPC: SHIP.TPC,
+    MCT1cm: SHIP.MCT1cm,
+    RHO_REF: js.ship.rho_ref ?? SHIP.RHO_REF,
+  };
+  window.LIGHT_SHIP = js.ship.light_ship || window.LIGHT_SHIP;
+  HYDRO_ROWS = (js.hydrostatics.rows||[]).sort((a,b)=>a.draft_m-b.draft_m);
+  ACTIVE = {
+    cargo: (js.tanks.cargo||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+    ballast: (js.tanks.ballast||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+  };
+  CONS_TANKS = (js.tanks.consumables||[]).map(t=>({ name: t.name, type: t.type, lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
+  buildTankInputs('cargo-tanks', ACTIVE.cargo);
+  buildTankInputs('ballast-tanks', ACTIVE.ballast);
+  renderConstants();
+  hideWizard();
+});
