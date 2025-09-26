@@ -509,6 +509,13 @@ function parseHydro(text) {
     if (map.tpc < 0 && /tpc/.test(hn)) map.tpc = i;
     if (map.mct < 0 && /mct/.test(hn)) map.mct = i;
   });
+  // Fallback: tolerate dotted/space-separated kısaltmalar even if normalization fails
+  if (map.mct < 0) {
+    for (let i = 0; i < headerRaw.length; i++) {
+      const raw = String(headerRaw[i] || '');
+      if (/m[^a-z0-9]*t[^a-z0-9]*c/i.test(raw)) { map.mct = i; break; }
+    }
+  }
   for (let i = headerIdx + 1; i < rawLines.length; i++) {
     const cols = splitLine(rawLines[i], delim);
     const get = (idx) => (idx >= 0 && idx < cols.length) ? cols[idx] : '';
