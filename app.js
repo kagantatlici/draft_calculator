@@ -487,28 +487,32 @@ function splitLine(line, delim) {
 }
 function parseHydro(text) {
   const out = [];
-  const lines = normText(text).split(/\r?\n/).filter(l=>l.trim().length>0);
-  if (!lines.length) return out;
-  const delim = detectDelimiter(lines[0]);
-  // try to find header: pick first line with any keyword
-  const keyRe = /(draft|dis\s*\(?(fw|sw)\)?|lcf|lcb|tpc|mct)/i;
-  let headerIdx = lines.findIndex(l=> keyRe.test(l));
-  if (headerIdx<0) headerIdx = 0;
-  const header = splitLine(lines[headerIdx], delim).map(x=>x.trim().toLowerCase());
-  const map = { draft:-1, dis_fw:-1, dis_sw:-1, lcf:-1, lcb:-1, tpc:-1, mct:-1 };
-  header.forEach((h,i)=>{
-    if (map.draft<0 && /draft/.test(h)) map.draft=i;
-    if (map.dis_fw<0 && /(dis.*fw|fw\b)/.test(h)) map.dis_fw=i;
-    if (map.dis_sw<0 && /(dis.*sw|sw\b)/.test(h)) map.dis_sw=i;
-    if (map.lcf<0 && /lcf/.test(h)) map.lcf=i;
-    if (map.lcb<0 && /lcb/.test(h)) map.lcb=i;
-    if (map.tpc<0 && /tpc/.test(h)) map.tpc=i;
-    if (map.mct<0 && /mct/.test(h)) map.mct=i;
+  const rawLines = normText(text).split(/\r?\n/).filter(l=>l.trim().length>0);
+  if (!rawLines.length) return out;
+  const normalizeKey = (s) => String(s).toLowerCase().replace(/[\s\.()\-]/g,'');
+  // Find a likely header line by normalized keywords (handles dotted forms like L.C.F.)
+  let headerIdx = rawLines.findIndex(l => {
+    const ln = normalizeKey(l);
+    return /(draft|disfw|dissw|lcf|lcb|tpc|mct)/.test(ln);
   });
-  for (let i=headerIdx+1;i<lines.length;i++){
-    const cols = splitLine(lines[i], delim);
-    const get = idx => (idx>=0 && idx<cols.length) ? cols[idx] : '';
-    const draft = toNumber(get(map.draft>=0?map.draft:0));
+  if (headerIdx < 0) headerIdx = 0;
+  const delim = detectDelimiter(rawLines[headerIdx]);
+  const headerRaw = splitLine(rawLines[headerIdx], delim);
+  const headerNorm = headerRaw.map(h => normalizeKey(h));
+  const map = { draft:-1, dis_fw:-1, dis_sw:-1, lcf:-1, lcb:-1, tpc:-1, mct:-1 };
+  headerNorm.forEach((hn, i) => {
+    if (map.draft < 0 && /draft/.test(hn)) map.draft = i;
+    if (map.dis_fw < 0 && /(disfw|\bfw$)/.test(hn)) map.dis_fw = i;
+    if (map.dis_sw < 0 && /(dissw|\bsw$)/.test(hn)) map.dis_sw = i;
+    if (map.lcf < 0 && /lcf/.test(hn)) map.lcf = i;
+    if (map.lcb < 0 && /lcb/.test(hn)) map.lcb = i;
+    if (map.tpc < 0 && /tpc/.test(hn)) map.tpc = i;
+    if (map.mct < 0 && /mct/.test(hn)) map.mct = i;
+  });
+  for (let i = headerIdx + 1; i < rawLines.length; i++) {
+    const cols = splitLine(rawLines[i], delim);
+    const get = (idx) => (idx >= 0 && idx < cols.length) ? cols[idx] : '';
+    const draft = toNumber(get(map.draft >= 0 ? map.draft : 0));
     if (!isFinite(draft)) continue;
     const dis_fw = isFinite(toNumber(get(map.dis_fw))) ? toNumber(get(map.dis_fw)) : undefined;
     const dis_sw = isFinite(toNumber(get(map.dis_sw))) ? toNumber(get(map.dis_sw)) : undefined;
@@ -516,7 +520,7 @@ function parseHydro(text) {
     const lcb = toNumber(get(map.lcb));
     const tpc = toNumber(get(map.tpc));
     const mct = toNumber(get(map.mct));
-    out.push({ draft_m:draft, dis_fw, dis_sw, lcf_m:lcf, lcb_m:lcb, tpc, mct });
+    out.push({ draft_m: draft, dis_fw, dis_sw, lcf_m: lcf, lcb_m: lcb, tpc, mct });
   }
   return out;
 }
