@@ -9,7 +9,6 @@
   <body>
     <header>
       <h1>Draft & Trim (Tanker) – Basit Hesaplayıcı</h1>
-      <p>Kaynak: Trim & Stability Booklet (MAGNI ALEXA) – basitleştirilmiş</p>
     </header>
 
     <main>
@@ -24,29 +23,8 @@
             Consumables (FO+FW+LO) toplamı (t)
             <input id="fofw" type="number" step="0.1" value="0" />
           </label>
-          <label>
-            Light ship (geminin sabiti) ağırlığı (t)
-            <input id="lightship" type="number" step="1" value="0" />
-          </label>
         </div>
-        <small>Not: Consumables LCG otomatik hesaplanır (tank LCG ve hacimlerine göre).</small>
-        <details class="notes" style="margin-top:8px;">
-          <summary>Hidrostatikler (isterseniz override edin)</summary>
-          <div class="grid" style="margin-top:8px;">
-            <label>
-              LCF (m, midship +ileri)
-              <input id="ovLCF" type="number" step="0.001" placeholder="boş = sabit" />
-            </label>
-            <label>
-              TPC (t/cm)
-              <input id="ovTPC" type="number" step="0.1" placeholder="boş = sabit" />
-            </label>
-            <label>
-              MCT1cm (t·m/cm)
-              <input id="ovMCT" type="number" step="0.1" placeholder="boş = sabit" />
-            </label>
-          </div>
-        </details>
+        
       </section>
 
       <div class="tank-columns">
@@ -71,15 +49,15 @@
         <h2>Sonuçlar</h2>
         <div class="grid results-grid">
           <div>
-            <div class="result-label">Toplam Ağırlık (t)</div>
+            <div class="result-label">Deplasman (displacement)</div>
             <div class="result-value" id="resW">0.0</div>
           </div>
           <div>
-            <div class="result-label">Top. Boyuna Moment (t·m)</div>
-            <div class="result-value" id="resM">0.0</div>
+            <div class="result-label">Baş Draft (m)</div>
+            <div class="result-value" id="resTf">0.000</div>
           </div>
           <div>
-            <div class="result-label">Vasat Draft (m)</div>
+            <div class="result-label">Vasat Draftı (m)</div>
             <div class="result-value" id="resTm">0.000</div>
           </div>
           <div>
@@ -87,16 +65,9 @@
             <div class="result-value" id="resTa">0.000</div>
           </div>
           <div>
-            <div class="result-label">Baş Draft (m)</div>
-            <div class="result-value" id="resTf">0.000</div>
-          </div>
-          <div>
             <div class="result-label">Trim (cm, kıça +)</div>
             <div class="result-value" id="resTrim">0.0</div>
           </div>
-        </div>
-        <div class="notes" style="margin-top:8px;">
-          <div><b>Kullanılan hidrostatikler</b>: <span id="hydro-used">LCF -, TPC -, MCT1cm -</span></div>
         </div>
         <details class="notes">
           <summary>Notlar / Varsayımlar</summary>
@@ -105,7 +76,6 @@
             <li>LCF sabit alınmıştır; LCG referansı midship’tir (+ ileri).</li>
             <li>Yoğunluk düzeltmesi: ΔTmean = (W/TPC) × (1.025/ρ).</li>
             <li>Trim hesabında işaret: kıça trim (+), başa trim (−).</li>
-            <li>FO+FW tek giriş LCG’i: PDF’teki tipik yükleme sayfası toplamlarından türetilmiştir.</li>
           </ul>
           <div id="consts-list"></div>
         </details>

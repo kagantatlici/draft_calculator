@@ -103,7 +103,6 @@ function renderConstants() {
     `<div><b>MCT1cm</b>: ${fmt(MCT1cm, 1)} t·m/cm</div>`,
     `<div><b>ρ_ref</b>: ${fmt(RHO_REF, 3)} t/m³</div>`,
     `<div><b>Light ship</b>: ${ls.weight ?? '-'} t @ LCG ${fmt(ls.lcg ?? 0, 2)} m</div>`,
-    `<div><b>Hydro tablosu</b>: ${Array.isArray(HYDRO_ROWS) ? HYDRO_ROWS.length : 0} satır</div>`,
     `<div><b>Consumables tankları</b>: ${Array.isArray(CONS_TANKS) ? CONS_TANKS.length : 0} adet</div>`,
     `<div><b>Tank sayısı</b>: Cargo ${ACTIVE.cargo.length}, Ballast ${ACTIVE.ballast.length}</div>`,
   ];
@@ -151,7 +150,6 @@ function readWeights(tanks) {
 function calc() {
   const rho = parseFloat(el('rho').value || '1.025') || SHIP.RHO_REF;
   const wCons = parseFloat(el('fofw').value || '0') || 0;
-  const wLS = parseFloat(el('lightship').value || '0') || 0;
   // Auto-consumables LCG from data/consumables.json if available
   const lcgConsumables = (() => {
     if (!(Array.isArray(CONS_TANKS) && CONS_TANKS.length && wCons>0)) return LCG_FO_FW;
@@ -194,7 +192,10 @@ function calc() {
   // FO+FW single input as one mass at fixed LCG
   const items = [...cargo, ...ballast];
   if (wCons !== 0) items.push({ name: 'Consumables', w: wCons, x: lcgConsumables });
-  if (wLS !== 0) items.push({ name: 'Light Ship', w: wLS, x: (window.LIGHT_SHIP?.lcg ?? 0) });
+  // Always include light ship if available
+  if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number' && window.LIGHT_SHIP.weight > 0) {
+    items.push({ name: 'Light Ship', w: window.LIGHT_SHIP.weight, x: (window.LIGHT_SHIP.lcg ?? 0) });
+  }
 
   // Totals
   const W = items.reduce((s, it) => s + it.w, 0);
@@ -218,10 +219,7 @@ function calc() {
   }
 
   // Apply manual overrides if provided
-  const vLCF = parseFloat((document.getElementById('ovLCF')||{}).value);
-  const vTPC = parseFloat((document.getElementById('ovTPC')||{}).value);
-  const vMCT = parseFloat((document.getElementById('ovMCT')||{}).value);
-  if (!Number.isNaN(vLCF)) LCF = vLCF;
+  const vLCF = NaN, vTPC = NaN, vMCT = NaN; // overrides removed from UI
   // If no hydro table or T could not be solved, fall back to TPC method
   let dTmean_cm;
   if (!isFinite(Tmean_m)) {
@@ -256,29 +254,16 @@ function calc() {
 
   // Render results
   el('resW').textContent = fmt(W, 1);
-  el('resM').textContent = fmt(Mx_mid, 1);
   el('resTm').textContent = fmt(Tmean_m, 3);
   el('resTa').textContent = fmt(Da, 3);
   el('resTf').textContent = fmt(Df, 3);
   el('resTrim').textContent = fmt(Trim_cm, 1);
-  // Optionally show which hydro values were used
-  const hud = document.getElementById('hydro-used');
-  if (hud) {
-    hud.textContent = `LCF ${fmt(LCF,2)} m, LCB ${fmt(LCB,2)} m, TPC ${fmt(TPC,1)} t/cm, MCT1cm ${fmt(MCT1cm,1)} t·m/cm`;
-  }
 }
 
 function clearAll() {
   el('rho').value = SHIP.RHO_REF.toString();
   el('fofw').value = '0';
-  if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number') {
-    el('lightship').value = String(window.LIGHT_SHIP.weight);
-  } else {
-    el('lightship').value = '0';
-  }
-  const o1 = document.getElementById('ovLCF'); if (o1) o1.value = '';
-  const o2 = document.getElementById('ovTPC'); if (o2) o2.value = '';
-  const o3 = document.getElementById('ovMCT'); if (o3) o3.value = '';
+  // overrides and lightship input removed from UI
   for (const t of [...ACTIVE.cargo, ...ACTIVE.ballast]) {
     const inp = document.getElementById(`w_${t.id}`);
     if (inp) inp.value = '0';
@@ -297,9 +282,6 @@ function prefillExample() {
   const fill = 0.98;
   el('rho').value = (SHIP.RHO_REF).toString();
   el('fofw').value = '0';
-  if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number') {
-    el('lightship').value = String(window.LIGHT_SHIP.weight);
-  }
 
   for (const t of ACTIVE.cargo) {
     const cap = Number(t.cap_m3 || 0);
