@@ -2,6 +2,7 @@
 
 let ACTIVE = { cargo: [], ballast: [] };
 let HYDRO_ROWS = null; // loaded from data/hydrostatics.json if available
+let CONS_TANKS = null; // loaded from data/consumables.json if available
 let LAST_TMEAN = null; // remember last mean draft for better iteration start
 
 async function loadTanksFromJson() {
@@ -29,6 +30,21 @@ async function loadHydroFromJson() {
     // Basic validation for expected keys
     const ok = rows.every(r => typeof r.draft_m === 'number' && typeof r.tpc === 'number' && typeof r.mct === 'number' && typeof r.lcf_m === 'number');
     return ok ? rows.sort((a,b) => a.draft_m - b.draft_m) : null;
+  } catch (_) { return null; }
+}
+
+async function loadConsumablesFromJson() {
+  try {
+    const res = await fetch('./data/consumables.json');
+    if (!res.ok) return null;
+    const data = await res.json();
+    const tanks = Array.isArray(data.tanks) ? data.tanks : [];
+    // keep only known types and numeric lcg; cap_m3 optional
+    const valid = ['fuel', 'freshwater', 'lube'];
+    const rows = tanks
+      .map(t => ({ name: t.name, type: String(t.type||'').toLowerCase(), lcg: Number(t.lcg), cap_m3: (t.cap_m3!=null?Number(t.cap_m3):null) }))
+      .filter(t => valid.includes(t.type) && isFinite(t.lcg));
+    return rows.length ? rows : null;
   } catch (_) { return null; }
 }
 
@@ -86,9 +102,9 @@ function renderConstants() {
     `<div><b>TPC</b>: ${fmt(TPC, 1)} t/cm</div>`,
     `<div><b>MCT1cm</b>: ${fmt(MCT1cm, 1)} t·m/cm</div>`,
     `<div><b>ρ_ref</b>: ${fmt(RHO_REF, 3)} t/m³</div>`,
-    `<div><b>FO+FW LCG</b>: ${fmt(LCG_FO_FW, 2)} m</div>`,
     `<div><b>Light ship</b>: ${ls.weight ?? '-'} t @ LCG ${fmt(ls.lcg ?? 0, 2)} m</div>`,
     `<div><b>Hydro tablosu</b>: ${Array.isArray(HYDRO_ROWS) ? HYDRO_ROWS.length : 0} satır</div>`,
+    `<div><b>Consumables tankları</b>: ${Array.isArray(CONS_TANKS) ? CONS_TANKS.length : 0} adet</div>`,
     `<div><b>Tank sayısı</b>: Cargo ${ACTIVE.cargo.length}, Ballast ${ACTIVE.ballast.length}</div>`,
   ];
   box.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;margin-top:8px;color:#9fb3c8;font-size:12px;">${parts.join('')}</div>`;
@@ -134,8 +150,42 @@ function readWeights(tanks) {
 
 function calc() {
   const rho = parseFloat(el('rho').value || '1.025') || SHIP.RHO_REF;
-  const wFofw = parseFloat(el('fofw').value || '0') || 0;
+  const wCons = parseFloat(el('fofw').value || '0') || 0;
   const wLS = parseFloat(el('lightship').value || '0') || 0;
+  // Auto-consumables LCG from data/consumables.json if available
+  const lcgConsumables = (() => {
+    if (!(Array.isArray(CONS_TANKS) && CONS_TANKS.length && wCons>0)) return LCG_FO_FW;
+    const rhoBy = { fuel: 0.85, freshwater: 1.00, lube: 0.90 };
+    const types = ['fuel','freshwater','lube'];
+    let eqWeights = {};
+    let typeLCG = {};
+    for (const tp of types) {
+      const arr = CONS_TANKS.filter(t => t.type===tp);
+      if (!arr.length) continue;
+      const sumCap = arr.reduce((s,t)=> s + (isFinite(t.cap_m3)? t.cap_m3 : 0), 0);
+      const rho_t = rhoBy[tp] ?? 1.0;
+      const eq = sumCap > 0 ? rho_t * sumCap : arr.length * rho_t; // fallback equal if no caps
+      eqWeights[tp] = eq;
+      // capacity-weighted LCG for the type
+      let lcg;
+      if (sumCap > 0) {
+        const num = arr.reduce((s,t)=> s + (t.cap_m3||0) * t.lcg, 0);
+        lcg = num / sumCap;
+      } else {
+        const num = arr.reduce((s,t)=> s + t.lcg, 0); lcg = num / arr.length;
+      }
+      typeLCG[tp] = lcg;
+    }
+    const eqSum = Object.values(eqWeights).reduce((s,v)=> s+v, 0);
+    if (eqSum <= 0) return LCG_FO_FW;
+    // split total consumables to types by equivalent weights
+    const Wt = {};
+    for (const tp of Object.keys(eqWeights)) Wt[tp] = wCons * (eqWeights[tp] / eqSum);
+    const wSum = Object.values(Wt).reduce((s,v)=> s+v, 0);
+    if (wSum <= 0) return LCG_FO_FW;
+    const num = Object.keys(Wt).reduce((s,tp)=> s + (Wt[tp] * (typeLCG[tp] ?? 0)), 0);
+    return num / wSum;
+  })();
 
   // Collect tank items
   const cargo = readWeights(ACTIVE.cargo);
@@ -143,7 +193,7 @@ function calc() {
 
   // FO+FW single input as one mass at fixed LCG
   const items = [...cargo, ...ballast];
-  if (wFofw !== 0) items.push({ name: 'FO+FW', w: wFofw, x: LCG_FO_FW });
+  if (wCons !== 0) items.push({ name: 'Consumables', w: wCons, x: lcgConsumables });
   if (wLS !== 0) items.push({ name: 'Light Ship', w: wLS, x: (window.LIGHT_SHIP?.lcg ?? 0) });
 
   // Totals
@@ -275,6 +325,8 @@ function prefillExample() {
   }
   // Load hydro table if present
   HYDRO_ROWS = await loadHydroFromJson();
+  // Load consumables (FO/FW/LO) tank info if present
+  CONS_TANKS = await loadConsumablesFromJson();
   buildTankInputs('cargo-tanks', ACTIVE.cargo);
   buildTankInputs('ballast-tanks', ACTIVE.ballast);
   if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number') {
