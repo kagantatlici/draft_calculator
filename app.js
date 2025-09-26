@@ -1,9 +1,11 @@
 // Non-module usage; constants are on window.* (see constants.js)
 
 let ACTIVE = { cargo: [], ballast: [] };
-let HYDRO_ROWS = null; // loaded from data/hydrostatics.json if available
-let CONS_TANKS = null; // loaded from data/consumables.json if available
+let HYDRO_ROWS = null; // active ship hydro rows
+let CONS_TANKS = null; // active ship consumable tanks
 let LAST_TMEAN = null; // remember last mean draft for better iteration start
+let SHIP_ACTIVE = null; // active ship constants (fallback to SHIP)
+let SHIPS_INDEX = null; // available ships list
 
 async function loadTanksFromJson() {
   try {
@@ -94,7 +96,8 @@ function fmt(n, digits = 3) {
 function renderConstants() {
   const box = document.getElementById('consts-list');
   if (!box) return;
-  const { LBP, LCF, TPC, MCT1cm, RHO_REF } = SHIP;
+  const base = SHIP_ACTIVE || SHIP;
+  const { LBP, LCF, TPC, MCT1cm, RHO_REF } = base;
   const ls = window.LIGHT_SHIP || {};
   const parts = [
     `<div><b>LBP</b>: ${fmt(LBP, 2)} m</div>`,
@@ -148,7 +151,8 @@ function readWeights(tanks) {
 }
 
 function calc() {
-  const rho = parseFloat(el('rho').value || '1.025') || SHIP.RHO_REF;
+  const base = SHIP_ACTIVE || SHIP;
+  const rho = parseFloat(el('rho').value || String(base.RHO_REF || 1.025)) || (base.RHO_REF || 1.025);
   const wCons = parseFloat(el('fofw').value || '0') || 0;
   // Auto-consumables LCG from data/consumables.json if available
   const lcgConsumables = (() => {
@@ -202,8 +206,8 @@ function calc() {
   const Mx_mid = items.reduce((s, it) => s + it.w * it.x, 0); // moment about midship
 
   // Hydro constants (LBP constant). TPC/LCF/MCT dynamic from hydro table if available, else fallback to SHIP.* or overrides
-  const { LBP, RHO_REF } = SHIP;
-  let LCF = SHIP.LCF, LCB = 0, TPC = SHIP.TPC, MCT1cm = SHIP.MCT1cm;
+  const { LBP, RHO_REF } = base;
+  let LCF = base.LCF ?? SHIP.LCF, LCB = 0, TPC = base.TPC ?? SHIP.TPC, MCT1cm = base.MCT1cm ?? SHIP.MCT1cm;
 
   // If hydro table available, solve Tmean from displacement at given ρ using DIS(F.W) column
   let Tmean_m;
@@ -261,7 +265,8 @@ function calc() {
 }
 
 function clearAll() {
-  el('rho').value = SHIP.RHO_REF.toString();
+  const base = SHIP_ACTIVE || SHIP;
+  el('rho').value = String(base.RHO_REF || 1.025);
   el('fofw').value = '0';
   // overrides and lightship input removed from UI
   for (const t of [...ACTIVE.cargo, ...ACTIVE.ballast]) {
@@ -269,7 +274,6 @@ function clearAll() {
     if (inp) inp.value = '0';
   }
   el('resW').textContent = '0.0';
-  el('resM').textContent = '0.0';
   el('resTm').textContent = '0.000';
   el('resTa').textContent = '0.000';
   el('resTf').textContent = '0.000';
@@ -297,27 +301,110 @@ function prefillExample() {
   calc();
 }
 
-// Init UI (prefer JSON if present)
+// Ship management
+async function loadShipsIndex() {
+  try {
+    const res = await fetch('./data/ships/index.json');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.ships) ? data.ships : null;
+  } catch (_) { return null; }
+}
+
+async function loadShipProfile(id) {
+  try {
+    const res = await fetch(`./data/ships/${id}.json`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data;
+  } catch (_) { return null; }
+}
+
+async function activateShip(id) {
+  const profile = await loadShipProfile(id);
+  if (profile && profile.ship) {
+    const s = profile.ship;
+    SHIP_ACTIVE = {
+      LBP: s.lbp ?? SHIP.LBP,
+      LCF: SHIP.LCF, // base until per-ship static overrides provided
+      TPC: SHIP.TPC,
+      MCT1cm: SHIP.MCT1cm,
+      RHO_REF: s.rho_ref ?? SHIP.RHO_REF,
+    };
+    window.LIGHT_SHIP = s.light_ship || window.LIGHT_SHIP;
+    const rows = (profile.hydrostatics && Array.isArray(profile.hydrostatics.rows)) ? profile.hydrostatics.rows : [];
+    HYDRO_ROWS = rows.length ? rows.sort((a,b)=>a.draft_m-b.draft_m) : await loadHydroFromJson();
+    // Tanks
+    const cargo = (profile.tanks && Array.isArray(profile.tanks.cargo)) ? profile.tanks.cargo : [];
+    const ballast = (profile.tanks && Array.isArray(profile.tanks.ballast)) ? profile.tanks.ballast : [];
+    if (cargo.length + ballast.length > 0) {
+      ACTIVE = {
+        cargo: cargo.map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+        ballast: ballast.map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+      };
+    } else {
+      const fromJson = await loadTanksFromJson();
+      ACTIVE = fromJson || { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
+    }
+    // Consumables tanks: prefer per-ship, else global file
+    const cons = (profile.tanks && Array.isArray(profile.tanks.consumables)) ? profile.tanks.consumables : null;
+    if (cons && cons.length) {
+      CONS_TANKS = cons.map(t=>({ name: t.name, type: String(t.type||'').toLowerCase(), lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
+    } else {
+      CONS_TANKS = await loadConsumablesFromJson();
+    }
+    // Rebuild UI
+    buildTankInputs('cargo-tanks', ACTIVE.cargo);
+    buildTankInputs('ballast-tanks', ACTIVE.ballast);
+    renderConstants();
+  }
+}
+
+function populateShipDropdown(ships) {
+  const sel = document.getElementById('ship-select');
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (const s of ships) {
+    const opt = document.createElement('option');
+    opt.value = s.id; opt.textContent = s.name;
+    sel.appendChild(opt);
+  }
+}
+
+// Init UI
 (async () => {
-  const fromJson = await loadTanksFromJson();
-  if (fromJson && fromJson.cargo.length + fromJson.ballast.length > 0) {
-    ACTIVE = fromJson;
+  SHIPS_INDEX = await loadShipsIndex();
+  if (Array.isArray(SHIPS_INDEX) && SHIPS_INDEX.length) {
+    populateShipDropdown(SHIPS_INDEX);
+    const first = SHIPS_INDEX[0].id;
+    const sel = document.getElementById('ship-select');
+    if (sel) sel.value = first;
+    await activateShip(first);
   } else {
-    ACTIVE = { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
+    // Fallback to legacy single-ship data
+    const fromJson = await loadTanksFromJson();
+    ACTIVE = fromJson || { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
+    HYDRO_ROWS = await loadHydroFromJson();
+    CONS_TANKS = await loadConsumablesFromJson();
+    buildTankInputs('cargo-tanks', ACTIVE.cargo);
+    buildTankInputs('ballast-tanks', ACTIVE.ballast);
+    renderConstants();
   }
-  // Load hydro table if present
-  HYDRO_ROWS = await loadHydroFromJson();
-  // Load consumables (FO/FW/LO) tank info if present
-  CONS_TANKS = await loadConsumablesFromJson();
-  buildTankInputs('cargo-tanks', ACTIVE.cargo);
-  buildTankInputs('ballast-tanks', ACTIVE.ballast);
-  if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number') {
-    const ls = document.getElementById('lightship');
-    if (ls) ls.value = String(window.LIGHT_SHIP.weight);
-  }
-  renderConstants();
 })();
 
 el('calc').addEventListener('click', calc);
 el('prefill').addEventListener('click', prefillExample);
 el('clear').addEventListener('click', clearAll);
+const shipSel = document.getElementById('ship-select');
+if (shipSel) {
+  shipSel.addEventListener('change', async (e) => {
+    const id = e.target.value;
+    await activateShip(id);
+  });
+}
+const addShipBtn = document.getElementById('add-ship');
+if (addShipBtn) {
+  addShipBtn.addEventListener('click', () => {
+    alert('Gemi ekleme sihirbazı yakında: Şimdilik JSON profil dosyasıyla ekleniyor (data/ships/*.json).');
+  });
+}
