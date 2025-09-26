@@ -520,6 +520,67 @@ function parseHydro(text) {
   }
   return out;
 }
+// Quick import classification
+function classifyTextForSection(text) {
+  const t = text.toLowerCase();
+  let scoreHydro = 0, scoreCargo = 0, scoreBallast = 0, scoreCons = 0;
+  if (/hydrostatic/.test(t)) scoreHydro += 3;
+  if (/(draft|tpc|mct|lcf|lcb)/.test(t)) scoreHydro += 2;
+  if (/(dis\s*\(fw\)|dis\s*\(sw\)|displacement)/.test(t)) scoreHydro += 2;
+
+  if (/(cargo\s+tk|slop\s+tk|cargo\s+tank)/.test(t)) scoreCargo += 3;
+  if (/(no\.\s*\d\s*cargo|c\d+p|c\d+s)/.test(t)) scoreCargo += 1;
+
+  if (/(w\.b\.|ballast|f\.p\.\s*tk|a\.p\.\s*tk|wb\d)/.test(t)) scoreBallast += 3;
+
+  if (/(hfo|f\.o\.|fuel|d\.o\.|mdo|mgo|diesel|bunker|fresh\s*water|fw\b|lube|lub\.?\s*oil|lo\b)/.test(t)) scoreCons += 3;
+  if (/(hacim\s*\(100%\)|capacity\s*100%|m³)/.test(t)) scoreCons += 1;
+
+  const arr = [
+    ['hydro', scoreHydro],
+    ['cargo', scoreCargo],
+    ['ballast', scoreBallast],
+    ['cons', scoreCons],
+  ];
+  arr.sort((a,b)=>b[1]-a[1]);
+  return arr[0][1] > 0 ? arr[0][0] : 'unknown';
+}
+
+async function handleQuickFiles(fileList) {
+  if (!fileList || !fileList.length) return;
+  const log = (msg) => {
+    const el = document.getElementById('quick-log');
+    if (el) el.textContent = msg;
+  };
+  log(`İşleniyor: ${fileList.length} dosya...`);
+  let added = { hydro:0, cargo:0, ballast:0, cons:0 };
+  for (const f of fileList) {
+    try {
+      const text = await readFileAsText(f);
+      const kind = classifyTextForSection(text);
+      if (kind === 'hydro') {
+        const rows = parseHydro(text);
+        if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+      } else if (kind === 'cargo') {
+        const rows = parseTanksGeneric(text, 'tank');
+        if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
+      } else if (kind === 'ballast') {
+        const rows = parseTanksGeneric(text, 'tank');
+        if (rows.length) { WIZ.ballast = (WIZ.ballast||[]).concat(rows); added.ballast += rows.length; }
+      } else if (kind === 'cons') {
+        const rows = parseTanksGeneric(text, 'cons');
+        if (rows.length) { WIZ.cons = (WIZ.cons||[]).concat(rows); added.cons += rows.length; }
+      }
+    } catch (_) {}
+  }
+  // Update previews
+  renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+  renderTablePreview('preview-cargo', WIZ.cargo, ['name','lcg','cap_m3']);
+  renderTablePreview('preview-ballast', WIZ.ballast, ['name','lcg','cap_m3']);
+  renderTablePreview('preview-cons', WIZ.cons, ['name','type','lcg','cap_m3']);
+  updateWizStatus();
+  log(`Eklendi → Hydro:${added.hydro} Cargo:${added.cargo} Ballast:${added.ballast} Cons:${added.cons}`);
+}
 function buildMapUIHydro(lines, containerId) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -751,8 +812,33 @@ function bindWizardOnce() {
         renderTablePreview(`preview-${key}`, rows, cols);
         updateWizStatus();
       });
-    }
   }
+
+  // Quick multi-file dropzone
+  const dz = document.getElementById('dropzone-all');
+  const chooseAll = document.getElementById('choose-all');
+  const fileAll = document.getElementById('file-all');
+  if (dz) {
+    const over = (e)=>{ e.preventDefault(); e.stopPropagation(); dz.style.borderColor = '#60a5fa'; };
+    const leave = (e)=>{ e.preventDefault(); e.stopPropagation(); dz.style.borderColor = '#475569'; };
+    dz.addEventListener('dragover', over);
+    dz.addEventListener('dragleave', leave);
+    dz.addEventListener('drop', async (e)=>{
+      e.preventDefault(); e.stopPropagation(); dz.style.borderColor = '#475569';
+      const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+      await handleQuickFiles(files);
+    });
+    dz.addEventListener('click', ()=> fileAll && fileAll.click());
+  }
+  if (chooseAll && fileAll) {
+    chooseAll.addEventListener('click', ()=> fileAll.click());
+    fileAll.addEventListener('change', async ()=>{
+      const files = fileAll.files ? Array.from(fileAll.files) : [];
+      await handleQuickFiles(files);
+      fileAll.value = '';
+    });
+  }
+}
 
   const exportBtn = document.getElementById('wiz-export');
   if (exportBtn) exportBtn.addEventListener('click', ()=>{
