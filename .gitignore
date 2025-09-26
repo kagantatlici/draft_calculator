@@ -1,0 +1,11 @@
+.DS_Store
+.venv/
+node_modules/
+*.pdf
+*.PNG
+*.png
+*.jpg
+*.jpeg
+*.docx
+tools/__pycache__/
+__pycache__/
