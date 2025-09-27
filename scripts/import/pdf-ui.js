@@ -10,9 +10,7 @@ import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
 import { ocrPaddle, serverHealthy, __PADDLE_BASE__ } from './paddle-service.js';
 
-// Auto-bind button if present
-const btn = document.getElementById('btnImportWizard');
-if (btn) btn.addEventListener('click', mountImportWizard);
+// Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
 
 /**
  * Mount the PDF import modal wizard and control its lifecycle.
@@ -54,12 +52,8 @@ export function mountImportWizard() {
     overlay.querySelector('#pdfwiz-search')?.addEventListener('input', onSearch);
     // Method toggles
     const paddleOk = await serverHealthy();
-    const paddleToggle = overlay.querySelector('#method-paddle');
-    if (paddleToggle) {
-      paddleToggle.disabled = !paddleOk;
-      const hint = overlay.querySelector('#paddle-hint');
-      hint.textContent = paddleOk ? `Sunucu hazır: ${__PADDLE_BASE__}` : 'Sunucu yok → tarayıcı-içi OCR’a düş';
-    }
+    const hint = overlay.querySelector('#paddle-hint');
+    if (hint) hint.textContent = paddleOk ? `Sunucu hazır: ${__PADDLE_BASE__}` : 'Sunucu yok → seçseniz bile otomatik tarayıcı-içi OCR’a düşer';
     // Cloud OCR toggle static info
     overlay.querySelector('#cloud-ocr')?.setAttribute('disabled','disabled');
     // Next buttons
@@ -141,7 +135,19 @@ export function mountImportWizard() {
           table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
         }
       } else if (method === 'paddle') {
-        table = await ocrPaddle(image, state.roi);
+        try {
+          table = await ocrPaddle(image, state.roi);
+        } catch (err) {
+          console.warn('PaddleOCR erişilemedi, tarayıcı-içi OCR’a düşülüyor', err);
+          const items = await getPageTextItems(state.pdf, state.pageNo).catch(()=>null);
+          if (items && detectPdfKind(items) === 'vector') table = clusterToTable(items);
+          else {
+            const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
+            table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
+          }
+          const s = overlay.querySelector('#pdfwiz-status');
+          if (s) s.textContent = 'PaddleOCR bulunamadı → Tarayıcı-içi OCR sonucu';
+        }
       }
     } catch (err) {
       console.error(err);
@@ -245,11 +251,11 @@ export function mountImportWizard() {
     overlay.setAttribute('aria-hidden', 'true');
     overlay.innerHTML = '';
   }
-}
+  }
 
-// UI templates
-function renderModalHTML() {
-  return `
+  // UI templates
+  function renderModalHTML() {
+    return `
   <div class="pdfwiz-modal">
     <div class="pdfwiz-header">
       <div>PDF’ten Veri İçe Aktarma</div>
@@ -292,7 +298,7 @@ function renderModalHTML() {
       <div id="pdfwiz-status" class="muted"></div>
     </div>
   </div>`;
-}
+  }
 
 function renderMapUI(headers, mapping) {
   const opt = (id,label)=>{
@@ -311,6 +317,113 @@ function renderMapUI(headers, mapping) {
   </div>`;
 }
 
+/**
+ * Embedded mount: renders the wizard content into a provided container inside the existing Gemi Ekle modal.
+ * @param {HTMLElement} container
+ */
+export function mountImportWizardEmbedded(container) {
+  if (!container) return;
+  container.innerHTML = renderModalHTML();
+  // mark as embedded for styling
+  const modal = container.querySelector('.pdfwiz-modal');
+  if (modal) modal.classList.add('embedded');
+  // override close to simply hide container
+  const close = container.querySelector('#pdfwiz-close');
+  if (close) close.addEventListener('click', ()=>{ container.style.display='none'; container.innerHTML=''; });
+  // rewire internal mounting by creating a fake overlay reference targeting container
+  const overlay = document.getElementById('pdf-import-overlay') || document.createElement('div');
+  overlay.innerHTML = container.innerHTML; // not used directly, but keep API parity
+  // Reuse core by temporarily injecting a hidden overlay element and calling mountImportWizard logic on it would be heavy.
+  // Instead, lightly duplicate the init logic by triggering a synthetic click on file input to drive flow when user interacts.
+  // Simpler: call mountImportWizard but swap its target to container by monkey-patching getElementById for this call.
+  // For maintainability, we fallback to a minimal re-init: simulate the same handlers using the same helpers.
+  // Bind basic handlers from the overlay we just rendered (container is our root)
+  (function bind() {
+    const file = container.querySelector('#pdfwiz-file');
+    const status = container.querySelector('#pdfwiz-status');
+    let pdfDoc = null, pageNo = 1, roi = null, kind = 'scan', table = null;
+    file?.addEventListener('change', async (e) => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      status.textContent = `Yükleniyor: ${f.name}`;
+      pdfDoc = await loadPdf(f);
+      const grid = container.querySelector('#pdfwiz-thumbs');
+      const canvases = await renderThumbnails(pdfDoc, grid);
+      canvases.forEach(cv => {
+        cv.classList.add('thumb'); cv.setAttribute('tabindex','0'); cv.setAttribute('role','button');
+        cv.addEventListener('click', ()=> selectPage(Number(cv.dataset.pageNo)));
+        cv.addEventListener('keydown', (ev)=>{ if (ev.key==='Enter'||ev.key===' ') selectPage(Number(cv.dataset.pageNo)); });
+      });
+      selectPage(1);
+    });
+    async function selectPage(no){
+      pageNo = no; container.querySelector('#pdfwiz-pageno').textContent = String(no);
+      const items = await getPageTextItems(pdfDoc, no); kind = detectPdfKind(items);
+      container.querySelector('#pdfwiz-kind').textContent = kind==='vector'?'Metin tabanlı':'Taranmış';
+      await renderRoiCanvas();
+    }
+    async function renderRoiCanvas(){
+      const page = await pdfDoc.getPage(pageNo);
+      const viewport = page.getViewport({ scale: 0.9 });
+      const canvas = container.querySelector('#pdfwiz-roi');
+      canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d'); await page.render({ canvasContext: ctx, viewport }).promise;
+      let dragging=false, start=null, rect=null;
+      canvas.onmousedown=(e)=>{dragging=true; start=getPos(e)}; canvas.onmousemove=(e)=>{if(!dragging)return; rect=mkRect(start,getPos(e)); drawOverlay()}; canvas.onmouseup=(e)=>{if(!dragging)return; dragging=false; rect=mkRect(start,getPos(e)); roi=normRect(rect,canvas); drawOverlay()}; canvas.onmouseleave=()=>{dragging=false};
+      function getPos(ev){ const r=canvas.getBoundingClientRect(); return {x:ev.clientX-r.left,y:ev.clientY-r.top}; }
+      function mkRect(a,b){ return {x:Math.min(a.x,b.x), y:Math.min(a.y,b.y), w:Math.abs(a.x-b.x), h:Math.abs(a.y-b.y)}; }
+      function normRect(rc,cv){ return { x:rc.x/cv.width, y:rc.y/cv.height, w:rc.w/cv.width, h:rc.h/cv.height }; }
+      function drawOverlay(){ ctx.save(); ctx.strokeStyle='#22d3ee'; ctx.lineWidth=2; ctx.setLineDash([6,3]); ctx.clearRect(0,0,canvas.width,canvas.height); page.render({ canvasContext: ctx, viewport }); if(rect) ctx.strokeRect(rect.x,rect.y,rect.w,rect.h); ctx.restore(); }
+    }
+    container.querySelector('#go-roi')?.addEventListener('click', ()=> goto(2));
+    container.querySelector('#go-method')?.addEventListener('click', ()=> goto(3));
+    container.querySelector('#go-extract')?.addEventListener('click', async ()=>{
+      const method = container.querySelector('input[name="method"]:checked')?.value || 'client';
+      status.textContent = 'Çıkarım çalışıyor...';
+      const image = await cropPageToImage(pdfDoc, pageNo, roi);
+      try {
+        if (method==='client') {
+          const items = await getPageTextItems(pdfDoc, pageNo);
+          table = (kind==='vector')? clusterToTable(items) : tableFromClient(image, roi);
+        } else {
+          try { table = await ocrPaddle(image, roi); }
+          catch(_) { table = tableFromClient(image, roi); status.textContent='PaddleOCR yok → tarayıcı-içi sonuç'; }
+        }
+      } catch (e) { status.textContent = 'Hata: ' + (e.message||e); return; }
+      renderPreviewEmbedded(); goto(4); status.textContent='Bitti.';
+    });
+    function tableFromClient(image, roi){ return ocrClient(image,{lang:'eng+tur',psm:6}).then(ocr=> tableFromOcr(ocr.words, roi, {useOpenCV:true})); }
+    function renderPreviewEmbedded(){
+      const wrap = container.querySelector('#pdfwiz-preview'); wrap.innerHTML='';
+      if (!table || !table.cells || !table.cells.length) { wrap.innerHTML='<div class="info">Tablo bulunamadı.</div>'; return; }
+      const tbl = document.createElement('table'); tbl.className='grid';
+      for (let r=0; r<Math.min(40, table.cells.length); r++){ const tr=document.createElement('tr'); const row=table.cells[r]; for(let c=0;c<Math.min(12,row.length);c++){ const td=document.createElement(r===0?'th':'td'); td.textContent=row[c]; tr.appendChild(td);} tbl.appendChild(tr);} wrap.appendChild(tbl);
+      const headers = table.cells[0]||[]; const m=mapHeaders(headers); const mapBox = container.querySelector('#pdfwiz-map'); mapBox.innerHTML = renderMapUI(headers, m); mapBox.querySelector('#apply-map')?.addEventListener('click', ()=> applyMap(headers));
+    }
+    function applyMap(headers){
+      const fields = ['draft_m','lcf_m','tpc_t_per_cm','mct1cm_t_m_per_cm']; const col={};
+      for(const f of fields){ const v=container.querySelector(`#map-${f}`)?.value; col[f]=v===''?null:Number(v); }
+      const rows=[]; for(let r=1;r<table.cells.length;r++){ const row=table.cells[r]; const draft=toNum(row[col.draft_m]); if(!isFinite(draft)) continue; rows.push({ draft_m:draft, lcf_m:toNum(row[col.lcf_m]), tpc_t_per_cm:toNum(row[col.tpc_t_per_cm]), mct1cm_t_m_per_cm:toNum(row[col.mct1cm_t_m_per_cm]) }); }
+      const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100; const rowsCompat = rows.map(r=>({draft_m:r.draft_m,lcf_m:r.lcf_m,tpc:r.tpc_t_per_cm,mct:r.mct1cm_t_m_per_cm}));
+      const v = validateHydro(rowsCompat, {LBP: appLBP}); container.querySelector('#pdfwiz-validate').innerHTML = renderValidation(v);
+      container.dataset.rows = JSON.stringify(rows);
+    }
+    container.querySelector('#go-apply')?.addEventListener('click', ()=>{
+      const rows = JSON.parse(container.dataset.rows||'[]'); if(!rows.length){ alert('Aktarılacak satır yok.'); return; }
+      const compat = rows.map(r=>({draft_m:r.draft_m,lcf_m:r.lcf_m,tpc:r.tpc_t_per_cm,mct:r.mct1cm_t_m_per_cm}));
+      if (typeof window.applyHydrostaticsJson==='function'){ window.applyHydrostaticsJson({rows: compat}); alert('Hydrostatik tablo uygulandı.'); container.style.display='none'; container.innerHTML=''; }
+    });
+    container.querySelector('#go-download')?.addEventListener('click', ()=>{
+      const rows = JSON.parse(container.dataset.rows||'[]'); if(!rows.length){ alert('İndirilecek veri yok.'); return; }
+      const hydro = toHydrostaticsJson(rows); const blob=new Blob([JSON.stringify(hydro,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='hydrostatics_import.json'; a.click(); URL.revokeObjectURL(a.href);
+    });
+    function goto(n){ container.querySelectorAll('.pdfwiz-step').forEach((el,i)=>{ el.style.display = (i===(n-1))?'block':'none'; }); }
+  })();
+}
+
+// expose for non-module callers
+// eslint-disable-next-line no-undef
+window.PDFImportUI = { mountOverlay: mountImportWizard, mountEmbedded: mountImportWizardEmbedded };
+
 function renderValidation({ errors, warnings }) {
   const list = [];
   if (errors.length) list.push(`<div class="error">Hatalar: ${errors.length}</div><ul>` + errors.map(e=>`<li>${e}</li>`).join('') + '</ul>');
@@ -324,4 +437,3 @@ function toNum(s) {
   const n = Number(t);
   return isFinite(n) ? n : NaN;
 }
-

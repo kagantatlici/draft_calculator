@@ -748,6 +748,25 @@ function bindWizardOnce() {
   if (closeBtn) closeBtn.addEventListener('click', hideWizard);
   for (const b of getTabButtons()) b.addEventListener('click', () => activateTab(b.dataset.tab));
 
+  // PDF Import (embedded) inside wizard
+  const openPdfBtn = document.getElementById('open-pdf-import');
+  const pdfEmbed = document.getElementById('pdf-embed');
+  if (openPdfBtn && pdfEmbed) {
+    openPdfBtn.addEventListener('click', () => {
+      try {
+        pdfEmbed.style.display = 'block';
+        if (window.PDFImportUI && typeof window.PDFImportUI.mountEmbedded === 'function') {
+          window.PDFImportUI.mountEmbedded(pdfEmbed);
+        } else {
+          pdfEmbed.innerHTML = '<div style="color:#94a3b8;">PDF içe aktarma modülü yüklenemedi.</div>';
+        }
+      } catch (e) {
+        console.error(e);
+        alert('PDF içe aktarma yapılamadı.');
+      }
+    });
+  }
+
   const hydroBtn = document.getElementById('parse-hydro');
   if (hydroBtn) hydroBtn.addEventListener('click', ()=>{
     const txt = document.getElementById('paste-hydro').value;
