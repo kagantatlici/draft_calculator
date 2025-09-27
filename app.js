@@ -925,3 +925,27 @@ function download(filename, text) {
 }
 
 // (export/activate handlers are bound lazily when wizard opens)
+
+// --- Integration API for PDF Import Wizard ---
+/**
+ * Apply hydrostatics JSON to the running app state without breaking existing views.
+ * Keeps key names compatible with existing loader: draft_m, lcf_m, tpc, mct
+ * @param {{rows:Array<{draft_m:number,lcf_m:number,tpc:number,mct:number}>}} hydroJson
+ */
+function applyHydrostaticsJson(hydroJson) {
+  try {
+    const rows = Array.isArray(hydroJson?.rows) ? hydroJson.rows.slice() : [];
+    if (!rows.length) { alert('Boş hydrostatik veri.'); return; }
+    // Basic sanity
+    const ok = rows.every(r => isFinite(r.draft_m) && isFinite(r.tpc) && isFinite(r.mct));
+    if (!ok) { alert('Hydrostatik satırlar eksik veya hatalı.'); return; }
+    HYDRO_ROWS = rows.sort((a,b)=>a.draft_m - b.draft_m);
+    renderConstants();
+  } catch (err) {
+    console.error(err);
+    alert('Hydrostatik veri uygulanamadı.');
+  }
+}
+
+// expose for module usage
+window.applyHydrostaticsJson = applyHydrostaticsJson;

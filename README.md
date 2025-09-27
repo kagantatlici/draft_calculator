@@ -35,3 +35,29 @@ Notlar
 Kullanım
 - index.html dosyasını tarayıcıda açın (veya basit bir http sunucusuyla servis edin ki `data/*.json` dosyaları okunabilsin).
 - Girdileri doldurup “Hesapla” butonuna basın. Sonuç kartında kullanılan LCF/TPC/MCT1cm anlık olarak görüntülenir.
+
+PDF’ten Veri İçe Aktarma Sihirbazı
+- Üstteki “PDF’ten İçe Aktar” butonuna tıklayın.
+- Adımlar: PDF yükle → thumbnail ızgarasından sayfa seç → tablo bölgesi (ROI) çiz → çıkarım yöntemi seç (“Hızlı Tara” veya “Zor Dosya/PaddleOCR”) → tablo önizleme ve kolon eşleme → doğrulama → App’e aktar + JSON indir.
+- Hızlı Tara (tarayıcı-içi): pdf.js + Tesseract.js kullanır. Metin tabanlı PDF’lerde text layer’dan tablo klasterleme yapılır.
+- Zor Dosya (PaddleOCR): Yerel bir mikroservis gerekir; ulaşılmazsa buton otomatik devre dışı kalır ve tarayıcı-içi yönteme düşer.
+- Çıktı: Uygulamadaki hidrostatik tabloyu geçici olarak günceller (mevcut ekranları bozmaz). İsterseniz JSON olarak indirebilirsiniz.
+
+PaddleOCR Sunucusu (Ücretsiz, Zor Dosyalar İçin)
+- Dizine eklenen Docker servisini çalıştırın:
+  1) `cd server/paddleocr`
+  2) `docker build -t ocr .`
+  3) `docker run --rm -p 5001:5001 ocr`
+- CORS ve PNA: Sunucu, CORS’u açık ve `Access-Control-Allow-Private-Network: true` başlığı ile yanıt verir. Sayfa HTTPS iken `http://127.0.0.1:5001` erişimi tarayıcı tarafından engellenebilir (Mixed Content). Bu durumda tarayıcı-içi OCR’a düşülür ve UI’da bilgilendirme gösterilir.
+- Varsayılan taban URL: `http://127.0.0.1:5001`. Değiştirmek için tarayıcı konsolunda `localStorage.setItem('PADDLE_BASE','http://HOST:PORT')` yazabilirsiniz.
+
+Bulut OCR (Opsiyonel, Varsayılan Kapalı)
+- Google Document AI / AWS Textract / Azure Document Intelligence için `scripts/import/cloud-ocr-stubs.js` içinde stub çağrılar hazırdır fakat DEVRE DIŞI.
+- Etkinleştirme: `constants.js` içine `window.FEATURE_CLOUD_OCR = true;` ekleyin ve UI’de BYO anahtarlarınızı girerek (kod tarafını genişletmeniz gerekir) açın. Varsayılan olarak toggle devre dışıdır ve hiçbir çağrı yapılmaz.
+
+Testler (Manuel)
+- `tests/manual.md` dosyasındaki kontrol listesini izleyin:
+  - Metin tabanlı basit tablo → “Hızlı Tara” ile eşleme doğru mu?
+  - Düşük kaliteli tarama → “Hızlı Tara” başarısızsa “Zor Dosya” ile doğruluk artıyor mu?
+  - Confidence renklendirme/özet ve birim/mantık uyarıları tetikleniyor mu?
+  - JSON indir → tekrar yükle → hesap ekranında regresyon yok mu?

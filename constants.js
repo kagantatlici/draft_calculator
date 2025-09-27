@@ -66,3 +66,6 @@ window.BALLAST_TANKS = BALLAST_TANKS;
 
 // Light ship (approx from booklet; you can adjust)
 window.LIGHT_SHIP = { weight: 9070, lcg: -9.85 };
+
+// Feature flags
+window.FEATURE_CLOUD_OCR = false; // Bulut OCR varsayılan kapalı
