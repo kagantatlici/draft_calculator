@@ -766,6 +766,33 @@ function bindWizardOnce() {
       }
     });
   }
+  const paddleUrl = document.getElementById('paddle-url');
+  const paddleBtn = document.getElementById('paddle-save-test');
+  const paddleStatus = document.getElementById('paddle-status');
+  if (paddleUrl && paddleBtn && paddleStatus) {
+    try {
+      if (window.PaddleOCRClient && typeof window.PaddleOCRClient.getBase === 'function') {
+        paddleUrl.value = window.PaddleOCRClient.getBase();
+      }
+    } catch(_) {}
+    paddleBtn.addEventListener('click', async ()=>{
+      const url = (paddleUrl.value||'').trim();
+      if (!/^https?:\/\//i.test(url)) { paddleStatus.textContent = 'Geçerli bir URL girin (https://...)'; return; }
+      try {
+        if (window.PaddleOCRClient && typeof window.PaddleOCRClient.setBase === 'function') {
+          window.PaddleOCRClient.setBase(url);
+        } else {
+          localStorage.setItem('PADDLE_BASE', url);
+        }
+        paddleStatus.textContent = 'Kaydedildi, test ediliyor...';
+        const ok = await (window.PaddleOCRClient?.healthy?.() || Promise.resolve(false));
+        paddleStatus.textContent = ok ? 'Sunucu sağlıklı ✓' : 'Erişim başarısız';
+      } catch (e) {
+        console.error(e);
+        paddleStatus.textContent = 'Hata: erişilemedi';
+      }
+    });
+  }
 
   const hydroBtn = document.getElementById('parse-hydro');
   if (hydroBtn) hydroBtn.addEventListener('click', ()=>{

@@ -8,7 +8,7 @@ import { loadPdf, renderThumbnails, getPageTextItems, detectPdfKind, cropPageToI
 import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
-import { ocrPaddle, serverHealthy, __PADDLE_BASE__ } from './paddle-service.js';
+import { ocrPaddle, serverHealthy, __PADDLE_BASE__, setPaddleBase, getPaddleBase, getPaddleBase as __getBase } from './paddle-service.js';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
 
@@ -53,7 +53,7 @@ export function mountImportWizard() {
     // Method toggles
     const paddleOk = await serverHealthy();
     const hint = overlay.querySelector('#paddle-hint');
-    if (hint) hint.textContent = paddleOk ? `Sunucu hazır: ${__PADDLE_BASE__}` : 'Sunucu yok → seçseniz bile otomatik tarayıcı-içi OCR’a düşer';
+    if (hint) hint.textContent = paddleOk ? `Sunucu hazır: ${__getBase()}` : 'Sunucu yok → seçseniz bile otomatik tarayıcı-içi OCR’a düşer';
     // Cloud OCR toggle static info
     overlay.querySelector('#cloud-ocr')?.setAttribute('disabled','disabled');
     // Next buttons
@@ -423,6 +423,7 @@ export function mountImportWizardEmbedded(container) {
 // expose for non-module callers
 // eslint-disable-next-line no-undef
 window.PDFImportUI = { mountOverlay: mountImportWizard, mountEmbedded: mountImportWizardEmbedded };
+window.PaddleOCRClient = { setBase: setPaddleBase, getBase: getPaddleBase, healthy: serverHealthy };
 
 function renderValidation({ errors, warnings }) {
   const list = [];

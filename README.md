@@ -44,12 +44,21 @@ PDF’ten Veri İçe Aktarma Sihirbazı
 - Çıktı: Uygulamadaki hidrostatik tabloyu geçici olarak günceller (mevcut ekranları bozmaz). İsterseniz JSON olarak indirebilirsiniz.
 
 PaddleOCR Sunucusu (Ücretsiz, Zor Dosyalar İçin)
-- Dizine eklenen Docker servisini çalıştırın:
+- 1‑Tık Render Deploy (önerilir):
+  - Aşağıdaki butona tıklayın ve Render hesabınızda (ücretsiz plan) kurulumu tamamlayın.
+
+  [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/kagantatlici/draft_calculator)
+
+  - render.yaml bu repoda hazır. Deploy sonrası size `https://<proje-adı>.onrender.com` gibi HTTPS bir adres verilecek.
+  - Uygulamada “Gemi Ekle” penceresindeki “PaddleOCR Sunucu URL” alanına bu adresi yazın ve “Kaydet & Test” deyin.
+
+- Yerelde Docker ile (alternatif):
   1) `cd server/paddleocr`
   2) `docker build -t ocr .`
   3) `docker run --rm -p 5001:5001 ocr`
 - CORS ve PNA: Sunucu, CORS’u açık ve `Access-Control-Allow-Private-Network: true` başlığı ile yanıt verir. Sayfa HTTPS iken `http://127.0.0.1:5001` erişimi tarayıcı tarafından engellenebilir (Mixed Content). Bu durumda tarayıcı-içi OCR’a düşülür ve UI’da bilgilendirme gösterilir.
 - Varsayılan taban URL: `http://127.0.0.1:5001`. Değiştirmek için tarayıcı konsolunda `localStorage.setItem('PADDLE_BASE','http://HOST:PORT')` yazabilirsiniz.
+ - Alternatif olarak, “Gemi Ekle” modali içinde “PaddleOCR Sunucu URL (HTTPS)” alanıyla GUI üzerinden kaydedip health‑check yapabilirsiniz.
 
 Bulut OCR (Opsiyonel, Varsayılan Kapalı)
 - Google Document AI / AWS Textract / Azure Document Intelligence için `scripts/import/cloud-ocr-stubs.js` içinde stub çağrılar hazırdır fakat DEVRE DIŞI.

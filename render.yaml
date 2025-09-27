@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: paddleocr
+    env: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: server/paddleocr/Dockerfile
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+

@@ -4,7 +4,25 @@
  */
 
 const DEFAULT_BASE = 'http://127.0.0.1:5001';
-const BASE = (typeof localStorage !== 'undefined' && localStorage.getItem('PADDLE_BASE')) || DEFAULT_BASE;
+
+function getBase() {
+  // Allows overriding via window.PADDLE_OCR_BASE or localStorage
+  if (typeof window !== 'undefined' && window.PADDLE_OCR_BASE) return String(window.PADDLE_OCR_BASE);
+  if (typeof localStorage !== 'undefined') {
+    const v = localStorage.getItem('PADDLE_BASE');
+    if (v && v.trim().length) return v.trim();
+  }
+  return DEFAULT_BASE;
+}
+
+/** Save base URL and return it */
+export function setPaddleBase(url) {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem('PADDLE_BASE', String(url||'').trim()); } catch (_) {}
+  if (typeof window !== 'undefined') window.PADDLE_OCR_BASE = String(url||'').trim();
+  return getBase();
+}
+
+export function getPaddleBase() { return getBase(); }
 
 /**
  * Check server health.
@@ -12,7 +30,7 @@ const BASE = (typeof localStorage !== 'undefined' && localStorage.getItem('PADDL
  */
 export async function serverHealthy() {
   try {
-    const url = BASE.replace(/\/$/, '') + '/health';
+    const url = getBase().replace(/\/$/, '') + '/health';
     const res = await fetch(url, { method: 'GET', mode: 'cors' });
     return res.ok;
   } catch (err) {
@@ -29,7 +47,7 @@ export async function serverHealthy() {
 export async function ocrPaddle(imageOrPdfBlob, roi) {
   const healthy = await serverHealthy();
   if (!healthy) throw new Error('PaddleOCR sunucusu erişilemiyor (healthcheck başarısız).');
-  const url = BASE.replace(/\/$/, '') + '/pp/table';
+  const url = getBase().replace(/\/$/, '') + '/pp/table';
   const fd = new FormData();
   fd.append('file', imageOrPdfBlob, 'page.png');
   if (roi && typeof roi === 'object') fd.append('roi', JSON.stringify(roi));
@@ -39,12 +57,12 @@ export async function ocrPaddle(imageOrPdfBlob, roi) {
     return await res.json();
   } catch (err) {
     // Mixed content or PNA handling
-    if (location.protocol === 'https:' && /^http:\/\//.test(BASE)) {
+    const baseNow = getBase();
+    if (location.protocol === 'https:' && /^http:\/\//.test(baseNow)) {
       console.warn('HTTPS sayfadan HTTP yerel sunucuya erişim engellendi (Mixed Content).');
     }
     throw err;
   }
 }
 
-export const __PADDLE_BASE__ = BASE; // for UI diagnostics
-
+export const __PADDLE_BASE__ = getBase(); // for UI diagnostics
