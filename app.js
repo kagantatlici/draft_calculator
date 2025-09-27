@@ -748,6 +748,52 @@ function bindWizardOnce() {
   if (closeBtn) closeBtn.addEventListener('click', hideWizard);
   for (const b of getTabButtons()) b.addEventListener('click', () => activateTab(b.dataset.tab));
 
+  // PDF Import (embedded) inside wizard
+  const openPdfBtn = document.getElementById('open-pdf-import');
+  const pdfEmbed = document.getElementById('pdf-embed');
+  if (openPdfBtn && pdfEmbed) {
+    openPdfBtn.addEventListener('click', () => {
+      try {
+        pdfEmbed.style.display = 'block';
+        if (window.PDFImportUI && typeof window.PDFImportUI.mountEmbedded === 'function') {
+          window.PDFImportUI.mountEmbedded(pdfEmbed);
+        } else {
+          pdfEmbed.innerHTML = '<div style="color:#94a3b8;">PDF içe aktarma modülü yüklenemedi.</div>';
+        }
+      } catch (e) {
+        console.error(e);
+        alert('PDF içe aktarma yapılamadı.');
+      }
+    });
+  }
+  const paddleUrl = document.getElementById('paddle-url');
+  const paddleBtn = document.getElementById('paddle-save-test');
+  const paddleStatus = document.getElementById('paddle-status');
+  if (paddleUrl && paddleBtn && paddleStatus) {
+    try {
+      if (window.PaddleOCRClient && typeof window.PaddleOCRClient.getBase === 'function') {
+        paddleUrl.value = window.PaddleOCRClient.getBase();
+      }
+    } catch(_) {}
+    paddleBtn.addEventListener('click', async ()=>{
+      const url = (paddleUrl.value||'').trim();
+      if (!/^https?:\/\//i.test(url)) { paddleStatus.textContent = 'Geçerli bir URL girin (https://...)'; return; }
+      try {
+        if (window.PaddleOCRClient && typeof window.PaddleOCRClient.setBase === 'function') {
+          window.PaddleOCRClient.setBase(url);
+        } else {
+          localStorage.setItem('PADDLE_BASE', url);
+        }
+        paddleStatus.textContent = 'Kaydedildi, test ediliyor...';
+        const ok = await (window.PaddleOCRClient?.healthy?.() || Promise.resolve(false));
+        paddleStatus.textContent = ok ? 'Sunucu sağlıklı ✓' : 'Erişim başarısız';
+      } catch (e) {
+        console.error(e);
+        paddleStatus.textContent = 'Hata: erişilemedi';
+      }
+    });
+  }
+
   const hydroBtn = document.getElementById('parse-hydro');
   if (hydroBtn) hydroBtn.addEventListener('click', ()=>{
     const txt = document.getElementById('paste-hydro').value;

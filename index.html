@@ -25,7 +25,6 @@
           <select id="ship-select"></select>
         </label>
         <button id="add-ship" class="secondary">Gemi Ekle</button>
-        <button id="btnImportWizard" class="secondary">PDF’ten İçe Aktar</button>
       </div>
     </header>
 
@@ -125,6 +124,19 @@
             <label>Light ship ağırlık (t)<input id="wiz-ls-w" type="number" step="1" placeholder="örn. 9070" /></label>
             <label>Light ship LCG (m)<input id="wiz-ls-x" type="number" step="0.01" placeholder="örn. -9.85" /></label>
           </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button id="open-pdf-import" class="secondary">PDF’ten İçe Aktar (OCR)</button>
+            <span class="info" style="font-size:12px;">Zor dosyalar için PaddleOCR ile daha iyi sonuç alınabilir.</span>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+            <label style="display:flex; gap:6px; align-items:center;">
+              <span style="font-size:12px; color:#9fb3c8;">PaddleOCR Sunucu URL (HTTPS):</span>
+              <input id="paddle-url" type="url" placeholder="https://your-ocr.onrender.com" style="width:min(420px,60vw);" />
+            </label>
+            <button id="paddle-save-test" class="secondary">Kaydet & Test</button>
+            <span id="paddle-status" class="muted" style="font-size:12px;"></span>
+          </div>
+          <div id="pdf-embed" style="display:none; border:1px solid #1e293b; border-radius:6px; padding:8px;"></div>
           <!-- Quick multi-file import -->
           <div id="quick-import" style="border:1px dashed #334155; padding:10px; border-radius:8px; background:#0b1222;">
             <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Hızlı İçe Aktarma: Hydro + Tank dosyalarını (CSV/TSV/TXT) tek seferde buraya bırakın. Otomatik sınıflandırılır ve ilgili sekmelere eklenir.</div>
