@@ -13,7 +13,8 @@ RUN python -m pip install --no-cache-dir -U pip && \
       python-multipart==0.0.9 pillow==10.4.0 numpy==1.26.4 \
       opencv-python-headless==4.10.0.84 paddleocr==2.7.0.3
 
-COPY app.py /app/app.py
+# Render builds with repo root as context; copy using repo-relative path.
+COPY server/paddleocr/app.py /app/app.py
 
 EXPOSE 5001
 # Conservative CPU flags for broader CPU compatibility
