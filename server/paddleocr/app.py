@@ -127,7 +127,15 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
     if engine is None:
         try:
             # Avoid layout model to speed first load, treat whole image as table
-            engine = PPStructure(show_log=False, lang='en', use_gpu=False, layout=False)
+            engine = PPStructure(
+                show_log=False,
+                lang='en',
+                use_gpu=False,
+                layout=False,
+                # Lighter OCR stack to avoid SelfAttention fuse/IR on CPU
+                rec_algorithm='CRNN',
+                ocr_version='PP-OCRv2',
+            )
             app.state.table_engine = engine
         except Exception as e:
             resp = JSONResponse(status_code=500, content={"error": f"Engine init failed: {e}"})
@@ -183,7 +191,14 @@ async def warmup():
             os.environ.setdefault("FLAGS_enable_mkldnn", "0")
             _patch_paddle_predictor_ir()
             # layout=False to reduce model downloads during warmup
-            app.state.table_engine = PPStructure(show_log=False, lang='en', use_gpu=False, layout=False)
+            app.state.table_engine = PPStructure(
+                show_log=False,
+                lang='en',
+                use_gpu=False,
+                layout=False,
+                rec_algorithm='CRNN',
+                ocr_version='PP-OCRv2',
+            )
             # Trigger lazy ops with a tiny white image
             import numpy as np
             dummy = (255 * np.ones((64, 64, 3), dtype='uint8'))
