@@ -10,6 +10,65 @@ import asyncio
 import multiprocessing as mp
 import signal
 
+
+def _inference_child(queue, arr):
+    """Child process target: runs PaddleOCR PPStructure safely.
+    Returns a small JSON-serializable payload via queue.
+    """
+    try:
+        os.environ.setdefault("FLAGS_use_mkldnn", "0")
+        os.environ.setdefault("FLAGS_enable_mkldnn", "0")
+        _patch_paddle_predictor_ir()
+        from paddleocr import PPStructure
+        eng = PPStructure(
+            show_log=False,
+            lang='en',
+            use_gpu=False,
+            layout=False,
+            rec_algorithm='CRNN',
+            ocr_version='PP-OCRv2',
+        )
+        res = eng(arr)
+        # Build response payload to avoid large IPC transfers
+        cells = []
+        csv_lines = []
+        html = None
+        bboxes = []
+        confs = []
+        for r in res:
+            if isinstance(r, dict) and r.get('type') == 'table':
+                if isinstance(r.get('res'), dict):
+                    html = r['res'].get('html')
+                if 'bbox' in r:
+                    x1, y1, x2, y2 = r['bbox']
+                    bboxes.append({
+                        "x": int(x1),
+                        "y": int(y1),
+                        "w": int(x2 - x1),
+                        "h": int(y2 - y1)
+                    })
+            if isinstance(r, dict) and r.get('res') and isinstance(r['res'], list):
+                for it in r['res']:
+                    if isinstance(it, dict) and 'text' in it:
+                        line = it['text']
+                        csv_lines.append(line)
+                        try:
+                            confs.append(float(it.get('confidence', 0)))
+                        except Exception:
+                            pass
+                        cells.append([line])
+        confidence = float(sum(confs) / len(confs)) if confs else 0.0
+        payload = {
+            "html": html,
+            "cells": cells or None,
+            "csv": "\n".join(csv_lines) if csv_lines else None,
+            "bboxes": bboxes,
+            "confidence": confidence,
+        }
+        queue.put((True, payload, None))
+    except Exception as e:
+        queue.put((False, None, str(e)))
+
 # Be conservative on CPU-only hosts (e.g., Render free tier)
 # Disable MKLDNN and keep threads low to avoid crashes on CPUs
 # with limited instruction sets. Also patch Paddle IR passes below.
@@ -144,49 +203,9 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
             return _ensure_headers(resp)
     # Run inference in an isolated subprocess to avoid hard crashes (SIGILL/OOM)
     if os.getenv("ISOLATE_INFERENCE", "1").lower() in ("1", "true", "yes"):
-        def _child(queue, arr):
-            try:
-                os.environ.setdefault("FLAGS_use_mkldnn", "0")
-                os.environ.setdefault("FLAGS_enable_mkldnn", "0")
-                _patch_paddle_predictor_ir()
-                from paddleocr import PPStructure
-                eng = PPStructure(
-                    show_log=False,
-                    lang='en',
-                    use_gpu=False,
-                    layout=False,
-                    rec_algorithm='CRNN',
-                    ocr_version='PP-OCRv2',
-                )
-                res = eng(arr)
-                # Build payload here to avoid sending large images via IPC
-                cells = []
-                csv_lines = []
-                html = None
-                bboxes = []
-                confs = []
-                for r in res:
-                    if r.get('type') == 'table':
-                        html = r.get('res', {}).get('html') if isinstance(r.get('res'), dict) else None
-                        if 'bbox' in r:
-                            x1,y1,x2,y2 = r['bbox']
-                            bboxes.append({"x": int(x1), "y": int(y1), "w": int(x2-x1), "h": int(y2-y1)})
-                    if r.get('res') and isinstance(r['res'], list):
-                        for it in r['res']:
-                            if isinstance(it, dict) and 'text' in it:
-                                line = it['text']
-                                csv_lines.append(line)
-                                confs.append(float(it.get('confidence', 0)))
-                                cells.append([line])
-                confidence = float(sum(confs)/len(confs)) if confs else 0.0
-                payload = {"html": html, "cells": cells or None, "csv": "\n".join(csv_lines) if csv_lines else None, "bboxes": bboxes, "confidence": confidence}
-                queue.put((True, payload, None))
-            except Exception as e:
-                queue.put((False, None, str(e)))
-
         ctx = mp.get_context('spawn')
         q = ctx.Queue()
-        p = ctx.Process(target=_child, args=(q, np_img))
+        p = ctx.Process(target=_inference_child, args=(q, np_img))
         p.start()
         p.join(timeout=float(os.getenv("INFER_TIMEOUT", "55")))
         if p.is_alive():
