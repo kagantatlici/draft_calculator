@@ -7,6 +7,8 @@ import json
 import base64
 import os
 import asyncio
+import multiprocessing as mp
+import signal
 
 # Be conservative on CPU-only hosts (e.g., Render free tier)
 # Disable MKLDNN and keep threads low to avoid crashes on CPUs
@@ -113,8 +115,8 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
         import cv2
         h, w = np_img.shape[:2]
         max_side = max(h, w)
-        if max_side > 1800:
-            scale = 1800.0 / max_side
+        if max_side > 1280:
+            scale = 1280.0 / max_side
             np_img = cv2.resize(np_img, (int(w*scale), int(h*scale)))
     except Exception:
         pass
@@ -140,11 +142,82 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
         except Exception as e:
             resp = JSONResponse(status_code=500, content={"error": f"Engine init failed: {e}"})
             return _ensure_headers(resp)
-    try:
-        result = engine(np_img)
-    except Exception as e:
-        resp = JSONResponse(status_code=502, content={"error": f"Inference failed: {e}"})
-        return _ensure_headers(resp)
+    # Run inference in an isolated subprocess to avoid hard crashes (SIGILL/OOM)
+    if os.getenv("ISOLATE_INFERENCE", "1").lower() in ("1", "true", "yes"):
+        def _child(queue, arr):
+            try:
+                os.environ.setdefault("FLAGS_use_mkldnn", "0")
+                os.environ.setdefault("FLAGS_enable_mkldnn", "0")
+                _patch_paddle_predictor_ir()
+                from paddleocr import PPStructure
+                eng = PPStructure(
+                    show_log=False,
+                    lang='en',
+                    use_gpu=False,
+                    layout=False,
+                    rec_algorithm='CRNN',
+                    ocr_version='PP-OCRv2',
+                )
+                res = eng(arr)
+                # Build payload here to avoid sending large images via IPC
+                cells = []
+                csv_lines = []
+                html = None
+                bboxes = []
+                confs = []
+                for r in res:
+                    if r.get('type') == 'table':
+                        html = r.get('res', {}).get('html') if isinstance(r.get('res'), dict) else None
+                        if 'bbox' in r:
+                            x1,y1,x2,y2 = r['bbox']
+                            bboxes.append({"x": int(x1), "y": int(y1), "w": int(x2-x1), "h": int(y2-y1)})
+                    if r.get('res') and isinstance(r['res'], list):
+                        for it in r['res']:
+                            if isinstance(it, dict) and 'text' in it:
+                                line = it['text']
+                                csv_lines.append(line)
+                                confs.append(float(it.get('confidence', 0)))
+                                cells.append([line])
+                confidence = float(sum(confs)/len(confs)) if confs else 0.0
+                payload = {"html": html, "cells": cells or None, "csv": "\n".join(csv_lines) if csv_lines else None, "bboxes": bboxes, "confidence": confidence}
+                queue.put((True, payload, None))
+            except Exception as e:
+                queue.put((False, None, str(e)))
+
+        ctx = mp.get_context('spawn')
+        q = ctx.Queue()
+        p = ctx.Process(target=_child, args=(q, np_img))
+        p.start()
+        p.join(timeout=float(os.getenv("INFER_TIMEOUT", "55")))
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            resp = JSONResponse(status_code=504, content={"error": "Inference timeout"})
+            return _ensure_headers(resp)
+        if p.exitcode is None:
+            ok, payload, err = q.get() if not q.empty() else (False, None, "no result")
+            if not ok:
+                resp = JSONResponse(status_code=502, content={"error": f"Inference failed: {err}"})
+                return _ensure_headers(resp)
+            return _ensure_headers(JSONResponse(content=payload))
+        # Crash path: negative exit code indicates signal
+        if p.exitcode != 0:
+            sig = -p.exitcode if p.exitcode < 0 else 0
+            msg = f"backend crashed (signal={sig})" if sig else f"backend exited with code {p.exitcode}"
+            resp = JSONResponse(status_code=502, content={"error": msg})
+            return _ensure_headers(resp)
+        # Normal exit: read queue
+        ok, payload, err = q.get() if not q.empty() else (False, None, "no result")
+        if not ok:
+            resp = JSONResponse(status_code=502, content={"error": f"Inference failed: {err}"})
+            return _ensure_headers(resp)
+        return _ensure_headers(JSONResponse(content=payload))
+    else:
+        try:
+            result = engine(np_img)
+        except Exception as e:
+            resp = JSONResponse(status_code=502, content={"error": f"Inference failed: {e}"})
+            return _ensure_headers(resp)
 
     # Build simple CSV and cells
     cells = []
