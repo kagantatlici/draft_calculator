@@ -4,6 +4,12 @@ python-multipart==0.0.9
 pillow==10.4.0
 numpy==1.26.4
 opencv-python-headless==4.10.0.84
-PaddlePaddle==2.6.1
+
+# Paddle runtime + OCR
+paddlepaddle==2.6.1
 paddleocr==2.7.0.3
 
+# Utilities used by PaddleOCR's model downloader and optional exports
+requests>=2.31.0
+tqdm>=4.66.0
+tablepyxl==0.7.9

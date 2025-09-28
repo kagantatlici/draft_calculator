@@ -16,4 +16,10 @@ RUN python -m pip install --no-cache-dir -U pip && \
 COPY app.py /app/app.py
 
 EXPOSE 5001
-CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT:-5001}"
+# Conservative CPU flags for broader CPU compatibility
+ENV FLAGS_use_mkldnn=0 \
+    FLAGS_enable_mkldnn=0 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
+
+CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT:-5001} --workers 1"
