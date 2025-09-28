@@ -6,6 +6,7 @@ import io
 import json
 import base64
 import os
+import asyncio
 
 # Be conservative on CPU-only hosts (e.g., Render free tier)
 # Disable MKLDNN and keep threads low to avoid crashes on CPUs
@@ -125,7 +126,8 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
         engine = None
     if engine is None:
         try:
-            engine = PPStructure(show_log=False, lang='en', use_gpu=False)
+            # Avoid layout model to speed first load, treat whole image as table
+            engine = PPStructure(show_log=False, lang='en', use_gpu=False, layout=False)
             app.state.table_engine = engine
         except Exception as e:
             resp = JSONResponse(status_code=500, content={"error": f"Engine init failed: {e}"})
@@ -169,16 +171,25 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
 @app.on_event("startup")
 async def warmup():
     # Preload models to avoid first-request latency & reduce 502
-    try:
-        from paddleocr import PPStructure
-        os.environ.setdefault("FLAGS_use_mkldnn", "0")
-        os.environ.setdefault("FLAGS_enable_mkldnn", "0")
-        _patch_paddle_predictor_ir()
-        app.state.table_engine = PPStructure(show_log=False, lang='en', use_gpu=False)
-        # Trigger lazy ops with a tiny white image
-        import numpy as np
-        dummy = (255 * np.ones((64, 64, 3), dtype='uint8'))
-        _ = app.state.table_engine(dummy)
-    except Exception:
-        # Defer to first request
-        pass
+    # Optionally perform warmup in background only when enabled.
+    enable = os.getenv("ENABLE_WARMUP", "0").lower() in ("1", "true", "yes")
+    if not enable:
+        return
+
+    async def _bg():
+        try:
+            from paddleocr import PPStructure
+            os.environ.setdefault("FLAGS_use_mkldnn", "0")
+            os.environ.setdefault("FLAGS_enable_mkldnn", "0")
+            _patch_paddle_predictor_ir()
+            # layout=False to reduce model downloads during warmup
+            app.state.table_engine = PPStructure(show_log=False, lang='en', use_gpu=False, layout=False)
+            # Trigger lazy ops with a tiny white image
+            import numpy as np
+            dummy = (255 * np.ones((64, 64, 3), dtype='uint8'))
+            _ = app.state.table_engine(dummy)
+        except Exception:
+            # Ignore warmup failures; serve requests lazily
+            pass
+
+    asyncio.create_task(_bg())

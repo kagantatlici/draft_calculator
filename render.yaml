@@ -10,4 +10,13 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
-
+      - key: ENABLE_WARMUP
+        value: "0"
+      - key: FLAGS_use_mkldnn
+        value: "0"
+      - key: FLAGS_enable_mkldnn
+        value: "0"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
