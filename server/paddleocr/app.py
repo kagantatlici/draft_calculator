@@ -25,8 +25,11 @@ def _inference_child(queue, arr):
             lang='en',
             use_gpu=False,
             layout=False,
-            rec_algorithm='CRNN',
-            ocr_version='PP-OCRv2',
+            use_onnx=True,
+            # point to prebuilt ONNX models baked into the image
+            det_model_dir='/models/det.onnx',
+            rec_model_dir='/models/rec.onnx',
+            table_model_dir='/models/table.onnx',
         )
         res = eng(arr)
         # Build response payload to avoid large IPC transfers
@@ -225,8 +228,10 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
                     lang='en',
                     use_gpu=False,
                     layout=False,
-                    rec_algorithm='CRNN',
-                    ocr_version='PP-OCRv2',
+                    use_onnx=True,
+                    det_model_dir='/models/det.onnx',
+                    rec_model_dir='/models/rec.onnx',
+                    table_model_dir='/models/table.onnx',
                 )
                 app.state.table_engine = engine
             except Exception as e:
