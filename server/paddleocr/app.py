@@ -142,7 +142,7 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
         from PIL import Image
         import numpy as np
         import cv2
-        from paddleocr import PPStructure
+        # Do NOT import PPStructure in parent when isolation is enabled.
     except Exception as e:
         resp = JSONResponse(status_code=500, content={"error": f"Backend not ready: {e}"})
         return _ensure_headers(resp)
@@ -180,29 +180,9 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
     except Exception:
         pass
 
-    # Initialize engine (lang='en', CPU friendly)
-    try:
-        engine = app.state.table_engine
-    except Exception:
-        engine = None
-    if engine is None:
-        try:
-            # Avoid layout model to speed first load, treat whole image as table
-            engine = PPStructure(
-                show_log=False,
-                lang='en',
-                use_gpu=False,
-                layout=False,
-                # Lighter OCR stack to avoid SelfAttention fuse/IR on CPU
-                rec_algorithm='CRNN',
-                ocr_version='PP-OCRv2',
-            )
-            app.state.table_engine = engine
-        except Exception as e:
-            resp = JSONResponse(status_code=500, content={"error": f"Engine init failed: {e}"})
-            return _ensure_headers(resp)
     # Run inference in an isolated subprocess to avoid hard crashes (SIGILL/OOM)
-    if os.getenv("ISOLATE_INFERENCE", "1").lower() in ("1", "true", "yes"):
+    isolate = os.getenv("ISOLATE_INFERENCE", "1").lower() in ("1", "true", "yes")
+    if isolate:
         ctx = mp.get_context('spawn')
         q = ctx.Queue()
         p = ctx.Process(target=_inference_child, args=(q, np_img))
@@ -232,6 +212,26 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
             return _ensure_headers(resp)
         return _ensure_headers(JSONResponse(content=payload))
     else:
+        # Initialize engine in parent process only when isolation is disabled
+        try:
+            engine = app.state.table_engine
+        except Exception:
+            engine = None
+        if engine is None:
+            try:
+                from paddleocr import PPStructure
+                engine = PPStructure(
+                    show_log=False,
+                    lang='en',
+                    use_gpu=False,
+                    layout=False,
+                    rec_algorithm='CRNN',
+                    ocr_version='PP-OCRv2',
+                )
+                app.state.table_engine = engine
+            except Exception as e:
+                resp = JSONResponse(status_code=500, content={"error": f"Engine init failed: {e}"})
+                return _ensure_headers(resp)
         try:
             result = engine(np_img)
         except Exception as e:
