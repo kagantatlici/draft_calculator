@@ -15,7 +15,9 @@ RUN python -m pip install --no-cache-dir -U pip && \
       onnxruntime==1.18.1 paddle2onnx==1.0.9 requests==2.31.0 tqdm==4.66.4
 
 # Pre-convert required models to ONNX to avoid runtime downloads and Paddle Inference
-RUN mkdir -p /models/src && python - << 'PY'
+RUN set -eux; \
+    mkdir -p /models/src; \
+    cat >/tmp/build_onnx.py <<'PY' 
 import os, tarfile, requests, subprocess, sys
 
 urls = {
@@ -77,6 +79,7 @@ for name, url in urls.items():
   subprocess.check_call(cmd)
   print('ok', name, onnx_out)
 PY
+    && python /tmp/build_onnx.py 
 
 # Render builds with repo root as context; copy using repo-relative path.
 COPY server/paddleocr/app.py /app/app.py
