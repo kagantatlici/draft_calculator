@@ -5,6 +5,7 @@ from typing import Optional
 import io
 import json
 import base64
+import os
 
 app = FastAPI()
 
@@ -32,10 +33,13 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
         from PIL import Image
         import numpy as np
         import cv2
-        from paddleocr import PPStructure, save_structure_res
+        from paddleocr import PPStructure
     except Exception as e:
         resp = JSONResponse(status_code=500, content={"error": f"Backend not ready: {e}"})
         return _ensure_headers(resp)
+
+    # CPU safe flags
+    os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
     # Load image
     img = Image.open(io.BytesIO(data)).convert('RGB')
@@ -54,9 +58,34 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
         except Exception:
             pass
 
-    # Initialize once per request (keeps image compatibility simple)
-    table_engine = PPStructure(show_log=False)
-    result = table_engine(np_img)
+    # Limit max side for memory
+    try:
+        import cv2
+        h, w = np_img.shape[:2]
+        max_side = max(h, w)
+        if max_side > 1800:
+            scale = 1800.0 / max_side
+            np_img = cv2.resize(np_img, (int(w*scale), int(h*scale)))
+    except Exception:
+        pass
+
+    # Initialize engine (lang='en', CPU friendly)
+    try:
+        engine = app.state.table_engine
+    except Exception:
+        engine = None
+    if engine is None:
+        try:
+            engine = PPStructure(show_log=False, lang='en', use_gpu=False)
+            app.state.table_engine = engine
+        except Exception as e:
+            resp = JSONResponse(status_code=500, content={"error": f"Engine init failed: {e}"})
+            return _ensure_headers(resp)
+    try:
+        result = engine(np_img)
+    except Exception as e:
+        resp = JSONResponse(status_code=502, content={"error": f"Inference failed: {e}"})
+        return _ensure_headers(resp)
 
     # Build simple CSV and cells
     cells = []
@@ -88,3 +117,17 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
     resp = JSONResponse(content=payload)
     return _ensure_headers(resp)
 
+@app.on_event("startup")
+async def warmup():
+    # Preload models to avoid first-request latency & reduce 502
+    try:
+        from paddleocr import PPStructure
+        os.environ.setdefault("FLAGS_use_mkldnn", "0")
+        app.state.table_engine = PPStructure(show_log=False, lang='en', use_gpu=False)
+        # Trigger lazy ops with a tiny white image
+        import numpy as np
+        dummy = (255 * np.ones((64, 64, 3), dtype='uint8'))
+        _ = app.state.table_engine(dummy)
+    except Exception:
+        # Defer to first request
+        pass
