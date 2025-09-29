@@ -96,12 +96,35 @@ function htmlTableToCells(html) {
  * Returns a Paddle-like payload.
  */
 export async function ocrHFSpace(imageBlob, _roi) {
-  const base = getBaseHF();
+  const base = getBaseHF().replace(/\/$/, '');
+  // 1) Try to call the same Gradio endpoint the Space UI uses (api_name="run")
+  try {
+    const dataUrl = await blobToDataURL(imageBlob);
+    const res = await fetch(base + '/api/predict/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ data: [dataUrl] }),
+    });
+    if (res.ok) {
+      const out = await res.json();
+      // Expect Gradio payload: { data: [html, text, info], ... }
+      if (out && Array.isArray(out.data) && out.data.length >= 3) {
+        const html = String(out.data[0] ?? '');
+        const csv = String(out.data[1] ?? '');
+        const info = String(out.data[2] ?? '');
+        const cells = htmlTableToCells(html);
+        return { html, csv, info, cells, bboxes: null, confidence: null };
+      }
+    }
+  } catch (e) {
+    // fall through to REST fallback
+  }
+  // 2) Fallback to custom REST route used earlier
   const fd = new FormData();
   fd.append('file', imageBlob, 'page.png');
-  const res = await fetch(base.replace(/\/$/,'') + '/pp/table', { method: 'POST', body: fd });
-  if (!res.ok) throw new Error('HF Space API erişilemedi');
-  const js = await res.json();
+  const res2 = await fetch(base + '/pp/table', { method: 'POST', body: fd });
+  if (!res2.ok) throw new Error('HF Space API erişilemedi');
+  const js = await res2.json();
   if (!js.cells || !js.cells.length) js.cells = htmlTableToCells(js.html);
   return js;
 }
