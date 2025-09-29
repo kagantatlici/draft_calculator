@@ -19,7 +19,7 @@ RUN python -m pip install --no-cache-dir -U pip && \
 # - auto (default): Download Paddle models and convert to ONNX during build
 # - releases: Fetch prebuilt ONNX from GitHub Releases
 # - local: Copy ONNX files committed under server/paddleocr/models
-ARG MODELS_SOURCE=auto
+ARG MODELS_SOURCE=local
 ENV MODELS_SOURCE=${MODELS_SOURCE}
 ENV GITHUB_REPO=kagantatlici/draft_calculator MODELS_TAG=models-v1
 

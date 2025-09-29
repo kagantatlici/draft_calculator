@@ -21,6 +21,6 @@ services:
       - key: MKL_NUM_THREADS
         value: "1"
       - key: MODELS_SOURCE
-        value: "auto"
+        value: "local"
       - key: INFER_TIMEOUT
         value: "180"

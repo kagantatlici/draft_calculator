@@ -9,6 +9,9 @@ import os
 import asyncio
 import multiprocessing as mp
 import signal
+import tarfile
+import subprocess
+import time
 
 
 def _inference_child(queue, arr):
@@ -19,6 +22,8 @@ def _inference_child(queue, arr):
         os.environ.setdefault("FLAGS_use_mkldnn", "0")
         os.environ.setdefault("FLAGS_enable_mkldnn", "0")
         _patch_paddle_predictor_ir()
+        # Ensure ONNX models are present; build lazily if missing
+        _ensure_onnx_models()
         from paddleocr import PPStructure
         eng = PPStructure(
             show_log=False,
@@ -138,6 +143,90 @@ def _ensure_headers(resp: JSONResponse):
     resp.headers['Access-Control-Allow-Private-Network'] = 'true'
     return resp
 
+
+def _download_with_fallback(name: str, urls, dst_tar: str):
+    import requests
+    last = None
+    for url in urls:
+        try:
+            with requests.get(url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(dst_tar, 'wb') as f:
+                    for chunk in r.iter_content(1024*1024):
+                        if chunk:
+                            f.write(chunk)
+            return url
+        except Exception as e:
+            last = e
+            time.sleep(1)
+    raise last or Exception(f"no url for {name}")
+
+
+def _ensure_onnx_models():
+    os.makedirs('/models', exist_ok=True)
+    needed = {
+        'det': '/models/det.onnx',
+        'rec': '/models/rec.onnx',
+        'table': '/models/table.onnx',
+    }
+    missing = [k for k, p in needed.items() if not os.path.exists(p)]
+    if not missing:
+        return
+    url_sets = {
+        'det': [
+            'https://paddleocr.bj.bcebos.com/PP-OCRv3/english/en_PP-OCRv3_det_infer.tar',
+            'https://paddleocr.bj.bcebos.com/PP-OCRv3/det/en/en_PP-OCRv3_det_infer.tar',
+        ],
+        'rec': [
+            'https://paddleocr.bj.bcebos.com/PP-OCRv3/rec/en/en_PP-OCRv3_rec_infer.tar',
+            'https://paddleocr.bj.bcebos.com/PP-OCRv3/rec/english/en_PP-OCRv3_rec_infer.tar',
+            'https://paddleocr.bj.bcebos.com/PP-OCRv4/rec/en/en_PP-OCRv4_rec_infer.tar',
+            'https://paddleocr.bj.bcebos.com/PP-OCRv2/rec/en/en_PP-OCRv2_rec_infer.tar',
+        ],
+        'table': [
+            'https://paddleocr.bj.bcebos.com/ppstructure/models/slanet/en_ppstructure_mobile_v2.0_SLANet_infer.tar',
+        ],
+    }
+
+    for name in missing:
+        tar_path = f'/tmp/{name}.tar'
+        dst_dir = f'/tmp/{name}'
+        os.makedirs(dst_dir, exist_ok=True)
+        _download_with_fallback(name, url_sets[name], tar_path)
+        with tarfile.open(tar_path, 'r') as tar:
+            def is_within_directory(directory, target):
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+                return os.path.commonprefix([abs_directory, abs_target]) == abs_directory
+            for member in tar.getmembers():
+                member_path = os.path.join(dst_dir, member.name)
+                if not is_within_directory(dst_dir, member_path):
+                    raise Exception('Path traversal in tar file')
+            tar.extractall(dst_dir)
+        pdmodel = None; pdiparams = None
+        for d,_,files in os.walk(dst_dir):
+            for fn in files:
+                if fn.endswith('.pdmodel'): pdmodel = os.path.join(d, fn)
+                elif fn.endswith('.pdiparams'): pdiparams = os.path.join(d, fn)
+        if not pdmodel or not pdiparams:
+            raise RuntimeError(f"missing paddle files for {name}")
+        onnx_out = needed[name]
+        cmd = [
+            'paddle2onnx',
+            '--model_dir', os.path.dirname(pdmodel),
+            '--model_filename', os.path.basename(pdmodel),
+            '--params_filename', os.path.basename(pdiparams),
+            '--save_file', onnx_out,
+            '--opset_version', '11',
+            '--enable_onnx_checker', 'True'
+        ]
+        subprocess.check_call(cmd)
+        try:
+            os.remove(tar_path)
+        except Exception:
+            pass
+    return
+
 @app.post("/pp/table")
 async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)):
     data = await file.read()
@@ -188,11 +277,6 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
     if isolate:
         ctx = mp.get_context('spawn')
         q = ctx.Queue()
-        # sanity check presence of ONNX models
-        for pth in ('/models/det.onnx','/models/rec.onnx','/models/table.onnx'):
-            if not os.path.exists(pth):
-                resp = JSONResponse(status_code=500, content={"error": f"Missing ONNX model: {pth}. Ensure MODELS_SOURCE=local with models in server/paddleocr/models, or MODELS_TAG matches a GitHub Release with assets det.onnx/rec.onnx/table.onnx."})
-                return _ensure_headers(resp)
         p = ctx.Process(target=_inference_child, args=(q, np_img))
         p.start()
         p.join(timeout=float(os.getenv("INFER_TIMEOUT", "55")))
@@ -227,6 +311,7 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
             engine = None
         if engine is None:
             try:
+                _ensure_onnx_models()
                 from paddleocr import PPStructure
                 engine = PPStructure(
                     show_log=False,
