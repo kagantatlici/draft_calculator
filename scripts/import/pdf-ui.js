@@ -8,8 +8,7 @@ import { loadPdf, renderThumbnails, getPageTextItems, detectPdfKind, cropPageToI
 import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
-import { ocrPaddle, serverHealthy, __PADDLE_BASE__, setPaddleBase, getPaddleBase, getPaddleBase as __getBase } from './paddle-service.js';
-import { ocrHFSpace, hfHealthy, setHFBase, getHFBase } from './hfspace-service.js';
+import { ocrHFSpace, hfHealthy, getHFBase } from './hfspace-service.js';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
 
@@ -53,24 +52,9 @@ export function mountImportWizard() {
     // Search
     overlay.querySelector('#pdfwiz-search')?.addEventListener('input', onSearch);
     // Method toggles
-    const paddleOk = await serverHealthy();
     const hint = overlay.querySelector('#paddle-hint');
-    if (hint) hint.textContent = paddleOk ? `PaddleOCR hazır: ${__getBase()}` : 'PaddleOCR yoksa otomatik tarayıcı-içi OCR’a düşer';
-    // Enable HF Space controls
-    const hfUrl = overlay.querySelector('#hf-url');
-    const hfBtn = overlay.querySelector('#hf-save-test');
-    const hfStatus = overlay.querySelector('#hf-status');
-    if (hfUrl && hfBtn && hfStatus) {
-      try { hfUrl.value = getHFBase(); } catch(_) {}
-      hfBtn.addEventListener('click', async ()=>{
-        const url = (hfUrl.value||'').trim();
-        if (!/^https?:\/\//i.test(url)) { hfStatus.textContent = 'Geçerli bir URL girin (https://...)'; return; }
-        setHFBase(url);
-        hfStatus.textContent = 'Kaydedildi, test ediliyor...';
-        const ok = await hfHealthy();
-        hfStatus.textContent = ok ? 'HF Space hazır ✓' : 'Erişim başarısız';
-      });
-    }
+    const ok = await hfHealthy();
+    if (hint) hint.textContent = ok ? `Bulut OCR hazır: ${getHFBase()}` : 'Bulut OCR ulaşılamıyor; tarayıcı-içi yöntem kullanılacak.';
     // Next buttons
     overlay.querySelector('#go-roi')?.addEventListener('click', ()=> gotoStep(2));
     overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(3));
@@ -140,19 +124,7 @@ export function mountImportWizard() {
     const image = await cropPageToImage(state.pdf, state.pageNo, state.roi);
     let table = null;
     try {
-      const useCloud = overlay.querySelector('#cloud-ocr')?.checked;
-      if (useCloud) {
-        try {
-          table = await ocrHFSpace(image, state.roi);
-        } catch (err) {
-          console.warn('HF Space erişilemedi, diğer yollar deneniyor', err);
-          if (method === 'paddle') table = await ocrPaddle(image, state.roi);
-          else {
-            const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
-            table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
-          }
-        }
-      } else if (method === 'client') {
+      if (method === 'client') {
         // If vector, try structure; else OCR
         if (state.kind === 'vector') {
           const items = await getPageTextItems(state.pdf, state.pageNo);
@@ -162,18 +134,12 @@ export function mountImportWizard() {
           table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
         }
       } else if (method === 'paddle') {
-        try {
-          table = await ocrPaddle(image, state.roi);
-        } catch (err) {
-          console.warn('PaddleOCR erişilemedi, tarayıcı-içi OCR’a düşülüyor', err);
-          const items = await getPageTextItems(state.pdf, state.pageNo).catch(()=>null);
-          if (items && detectPdfKind(items) === 'vector') table = clusterToTable(items);
-          else {
-            const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
-            table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
-          }
-          const s = overlay.querySelector('#pdfwiz-status');
-          if (s) s.textContent = 'PaddleOCR bulunamadı → Tarayıcı-içi OCR sonucu';
+        try { table = await ocrHFSpace(image, state.roi); }
+        catch (err) {
+          console.warn('Bulut OCR erişilemedi, tarayıcı-içi OCR’a düşülüyor', err);
+          const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
+          table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
+          const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Bulut OCR yok → Tarayıcı-içi OCR sonucu';
         }
       }
     } catch (err) {
@@ -309,15 +275,8 @@ export function mountImportWizard() {
       <div class="pdfwiz-step" data-step="3" style="display:none;">
         <h3>3) Çıkarım Yöntemi</h3>
         <label><input type="radio" name="method" value="client" checked /> Hızlı Tara (Tarayıcı-içi)</label>
-        <label title="Yerel PaddleOCR"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (PaddleOCR)</label>
+        <label title="Bulut OCR (HF Space)"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (Bulut OCR)</label>
         <div id="paddle-hint" class="muted"></div>
-        <label title="HF Space ile Bulut OCR"><input id="cloud-ocr" type="checkbox" /> Hugging Face Space (Bulut)</label>
-        <div style="display:flex; gap:8px; align-items:center; margin:6px 0;">
-          <span style="font-size:12px; color:#9fb3c8;">HF Space URL:</span>
-          <input id="hf-url" type="url" placeholder="https://username-space.hf.space" style="width:min(420px,60vw);" />
-          <button id="hf-save-test" class="secondary">Kaydet & Test</button>
-          <span id="hf-status" class="muted" style="font-size:12px;"></span>
-        </div>
         <div class="row"><button id="go-extract">Tabloyu Çıkar ➜</button></div>
       </div>
       <div class="pdfwiz-step" data-step="4" style="display:none;">

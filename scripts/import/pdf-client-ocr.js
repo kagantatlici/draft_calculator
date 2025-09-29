@@ -12,7 +12,8 @@
  */
 export async function ocrClient(imageBlob, { lang = 'eng+tur', psm = 6 } = {}) {
   const { createWorker } = Tesseract;
-  const worker = await createWorker(lang, 1, { workerPath: undefined });
+  // Let Tesseract.js pick default paths from CDN script; avoid passing undefined workerPath
+  const worker = await createWorker(lang, 1);
   try {
     await worker.setParameters({ tessedit_pageseg_mode: String(psm) });
     const img = await blobToDataURL(imageBlob);
@@ -108,4 +109,3 @@ async function blobToDataURL(blob) {
     fr.readAsDataURL(blob);
   });
 }
-

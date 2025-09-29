@@ -126,15 +126,7 @@
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button id="open-pdf-import" class="secondary">PDF’ten İçe Aktar (OCR)</button>
-            <span class="info" style="font-size:12px;">Zor dosyalar için PaddleOCR ile daha iyi sonuç alınabilir.</span>
-          </div>
-          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px;">
-            <label style="display:flex; gap:6px; align-items:center;">
-              <span style="font-size:12px; color:#9fb3c8;">PaddleOCR Sunucu URL (HTTPS):</span>
-              <input id="paddle-url" type="url" placeholder="https://your-ocr.onrender.com" style="width:min(420px,60vw);" />
-            </label>
-            <button id="paddle-save-test" class="secondary">Kaydet & Test</button>
-            <span id="paddle-status" class="muted" style="font-size:12px;"></span>
+            <span class="info" style="font-size:12px;">Zor dosyalar için Bulut OCR kullanılır (HF Space).</span>
           </div>
           <div id="pdf-embed" style="display:none; border:1px solid #1e293b; border-radius:6px; padding:8px;"></div>
           <!-- Quick multi-file import -->
