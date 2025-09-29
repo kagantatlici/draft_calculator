@@ -8,9 +8,9 @@ import { loadPdf, renderThumbnails, getPageTextItems, detectPdfKind, cropPageToI
 import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
-import { hfHealthy, getHFBase } from './hfspace-service.js?v=lp2';
-import { normalizeHydroCells } from './table-normalize.js?v=lp2';
-import { parseWithLlamaParse } from './llamaparse-service.js?v=lp2';
+import { hfHealthy, getHFBase } from './hfspace-service.js?v=lp3';
+import { normalizeHydroCells } from './table-normalize.js?v=lp3';
+import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
 
@@ -126,8 +126,23 @@ export function mountImportWizard() {
         }
       } else if (method === 'llamaparse') {
         try {
-          const f = state.file || image;
-          table = await parseWithLlamaParse(f);
+          // If original upload was a PDF, send a single-page PDF to LlamaParse
+          const isPdf = state.file && ((state.file.type||'').includes('pdf') || /\.pdf$/i.test(state.file.name||''));
+          let toSend = state.file || image;
+          if (isPdf && typeof window.PDFLib !== 'undefined') {
+            try {
+              const PDFDocument = window.PDFLib.PDFDocument;
+              const origBytes = await state.file.arrayBuffer();
+              const src = await PDFDocument.load(origBytes);
+              const newDoc = await PDFDocument.create();
+              const pageIndex = Math.max(0, Math.min(src.getPageCount()-1, (state.pageNo||1)-1));
+              const [copied] = await newDoc.copyPages(src, [pageIndex]);
+              newDoc.addPage(copied);
+              const outBytes = await newDoc.save();
+              toSend = new Blob([outBytes], { type: 'application/pdf' });
+            } catch(_) { /* fallback to original file/image */ }
+          }
+          table = await parseWithLlamaParse(toSend);
           const norm = normalizeHydroCells(table.cells);
           if (norm && norm.length) table.cells = norm;
         } catch (err) { status.textContent = 'LlamaParse hatası: ' + (err.message || err); return; }
@@ -360,8 +375,25 @@ export function mountImportWizardEmbedded(container) {
           }
         } else if (method==='llamaparse') {
           try {
-            const f = imgBlob || (await cropPageToImage(pdfDoc, pageNo, null));
-            const out = await parseWithLlamaParse(f);
+            let toSend = imgBlob || (await cropPageToImage(pdfDoc, pageNo, null));
+            const wasPdf = !imgBlob && pdfDoc && typeof window.PDFLib !== 'undefined';
+            if (wasPdf && window.PDFLib) {
+              try {
+                const PDFDocument = window.PDFLib.PDFDocument;
+                // We don't have original File here reliably; fallback to image-only in embedded if missing
+                if (typeof state !== 'undefined' && state.file && ((state.file.type||'').includes('pdf') || /\.pdf$/i.test(state.file.name||''))){
+                  const origBytes = await state.file.arrayBuffer();
+                  const src = await PDFDocument.load(origBytes);
+                  const newDoc = await PDFDocument.create();
+                  const idx = Math.max(0, Math.min(src.getPageCount()-1, (pageNo||1)-1));
+                  const [copied] = await newDoc.copyPages(src, [idx]);
+                  newDoc.addPage(copied);
+                  const outBytes = await newDoc.save();
+                  toSend = new Blob([outBytes], { type: 'application/pdf' });
+                }
+              } catch(_) { /* ignore */ }
+            }
+            const out = await parseWithLlamaParse(toSend);
             table = { cells: out.cells||[], csv: (out.markdown||''), bboxes: [], confidence: null };
           } catch(e) { status.textContent='LlamaParse hatası: ' + (e.message||e); return; }
         }
