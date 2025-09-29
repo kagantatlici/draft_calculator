@@ -17,15 +17,16 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
 /**
  * Mount the PDF import modal wizard and control its lifecycle.
  */
-export function mountImportWizard() {
-  let state = {
-    pdf: null,
-    file: null,
-    pageNo: 1,
-    kind: 'scan',
-    roi: null, // {x,y,w,h} in normalized [0..1]
-    table: null, // {cells,csv,bboxes,confidence}
-  };
+  export function mountImportWizard() {
+    let state = {
+      pdf: null,
+      file: null,
+      pageNo: 1,
+      kind: 'scan',
+      roi: null, // {x,y,w,h} in normalized [0..1]
+      table: null, // {cells,csv,bboxes,confidence}
+      selectedPages: [], // multi-select support for LlamaParse (1-based)
+    };
   const overlay = document.getElementById('pdf-import-overlay');
   if (!overlay) return alert('PDF sihirbazı kapsayıcı bulunamadı.');
   overlay.innerHTML = renderModalHTML();
@@ -87,8 +88,27 @@ export function mountImportWizard() {
       cv.setAttribute('tabindex', '0');
       cv.setAttribute('role', 'button');
       cv.setAttribute('aria-label', `Sayfa ${cv.dataset.pageNo}`);
-      cv.addEventListener('click', () => selectPage(Number(cv.dataset.pageNo)));
-      cv.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') selectPage(Number(cv.dataset.pageNo)); });
+      cv.style.outlineOffset = '2px';
+      const pageNo = Number(cv.dataset.pageNo);
+      function toggleVisual() {
+        const sel = state.selectedPages.includes(pageNo);
+        cv.style.outline = sel ? '2px solid #38bdf8' : '';
+      }
+      cv.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          // toggle selection without changing primary page
+          const i = state.selectedPages.indexOf(pageNo);
+          if (i >= 0) state.selectedPages.splice(i,1); else state.selectedPages.push(pageNo);
+          toggleVisual();
+        } else {
+          selectPage(pageNo);
+        }
+      });
+      cv.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') selectPage(pageNo);
+      });
+      // initialize selected style if already selected
+      toggleVisual();
     });
     selectPage(1);
   }
@@ -126,7 +146,7 @@ export function mountImportWizard() {
         }
       } else if (method === 'llamaparse') {
         try {
-          // If original upload was a PDF, send a single-page PDF to LlamaParse
+          // If original upload was a PDF, send selected pages (multi-select) as a new PDF
           const isPdf = state.file && ((state.file.type||'').includes('pdf') || /\.pdf$/i.test(state.file.name||''));
           let toSend = state.file || image;
           if (isPdf && typeof window.PDFLib !== 'undefined') {
@@ -135,9 +155,11 @@ export function mountImportWizard() {
               const origBytes = await state.file.arrayBuffer();
               const src = await PDFDocument.load(origBytes);
               const newDoc = await PDFDocument.create();
-              const pageIndex = Math.max(0, Math.min(src.getPageCount()-1, (state.pageNo||1)-1));
-              const [copied] = await newDoc.copyPages(src, [pageIndex]);
-              newDoc.addPage(copied);
+              const total = src.getPageCount();
+              const uniqueSelected = Array.from(new Set((state.selectedPages||[]).filter(n=> n>=1 && n<=total)));
+              const indices = uniqueSelected.length ? uniqueSelected.map(n=> n-1) : [Math.max(0, Math.min(total-1, (state.pageNo||1)-1))];
+              const copiedPages = await newDoc.copyPages(src, indices);
+              copiedPages.forEach(p => newDoc.addPage(p));
               const outBytes = await newDoc.save();
               toSend = new Blob([outBytes], { type: 'application/pdf' });
             } catch(_) { /* fallback to original file/image */ }
@@ -330,7 +352,7 @@ export function mountImportWizardEmbedded(container) {
   (function bind() {
     const file = container.querySelector('#pdfwiz-file');
     const status = container.querySelector('#pdfwiz-status');
-    let pdfDoc = null, pageNo = 1, kind = 'scan', table = null, imgBlob = null;
+    let pdfDoc = null, pageNo = 1, kind = 'scan', table = null, imgBlob = null, selectedPages = [];
     file?.addEventListener('change', async (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       status.textContent = `Yükleniyor: ${f.name}`;
@@ -345,8 +367,15 @@ export function mountImportWizardEmbedded(container) {
         const canvases = await renderThumbnails(pdfDoc, grid);
         canvases.forEach(cv => {
           cv.classList.add('thumb'); cv.setAttribute('tabindex','0'); cv.setAttribute('role','button');
-          cv.addEventListener('click', ()=> selectPage(Number(cv.dataset.pageNo)));
+          const no = Number(cv.dataset.pageNo);
+          cv.style.outlineOffset = '2px';
+          function toggleVisual(){ const sel = selectedPages.includes(no); cv.style.outline = sel? '2px solid #38bdf8' : ''; }
+          cv.addEventListener('click', (ev)=>{
+            if (ev.ctrlKey || ev.metaKey){ const i=selectedPages.indexOf(no); if(i>=0) selectedPages.splice(i,1); else selectedPages.push(no); toggleVisual(); }
+            else selectPage(Number(cv.dataset.pageNo));
+          });
           cv.addEventListener('keydown', (ev)=>{ if (ev.key==='Enter'||ev.key===' ') selectPage(Number(cv.dataset.pageNo)); });
+          toggleVisual();
         });
         selectPage(1);
       }
@@ -376,23 +405,7 @@ export function mountImportWizardEmbedded(container) {
         } else if (method==='llamaparse') {
           try {
             let toSend = imgBlob || (await cropPageToImage(pdfDoc, pageNo, null));
-            const wasPdf = !imgBlob && pdfDoc && typeof window.PDFLib !== 'undefined';
-            if (wasPdf && window.PDFLib) {
-              try {
-                const PDFDocument = window.PDFLib.PDFDocument;
-                // We don't have original File here reliably; fallback to image-only in embedded if missing
-                if (typeof state !== 'undefined' && state.file && ((state.file.type||'').includes('pdf') || /\.pdf$/i.test(state.file.name||''))){
-                  const origBytes = await state.file.arrayBuffer();
-                  const src = await PDFDocument.load(origBytes);
-                  const newDoc = await PDFDocument.create();
-                  const idx = Math.max(0, Math.min(src.getPageCount()-1, (pageNo||1)-1));
-                  const [copied] = await newDoc.copyPages(src, [idx]);
-                  newDoc.addPage(copied);
-                  const outBytes = await newDoc.save();
-                  toSend = new Blob([outBytes], { type: 'application/pdf' });
-                }
-              } catch(_) { /* ignore */ }
-            }
+            // If we have pdfDoc but not original file, we cannot reconstruct exact bytes; fall back to image unless single page is enough
             const out = await parseWithLlamaParse(toSend);
             table = { cells: out.cells||[], csv: (out.markdown||''), bboxes: [], confidence: null };
           } catch(e) { status.textContent='LlamaParse hatası: ' + (e.message||e); return; }
