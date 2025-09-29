@@ -139,7 +139,13 @@ export function mountImportWizard() {
         try {
           table = await ocrHFStructure(image);
           const norm = normalizeHydroCells(table.cells);
-          if (norm && norm.length) table.cells = norm;
+          if (Array.isArray(norm) && norm.length >= 2) {
+            const head = (norm[0]||[]).map(x=> String(x||'').toLowerCase());
+            const body = norm.slice(1);
+            const hasTPC = body.some(r=> r.some(c=> /tpc/i.test(String(c))));
+            const hasMCT = body.some(r=> r.some(c=> /(mct|mtc)/i.test(String(c))));
+            if (hasTPC && hasMCT) table.cells = norm; // only adopt if key rows present
+          }
         }
         catch (err) { status.textContent = 'Structure API hatası: ' + (err.message || err); return; }
       } else if (method === 'ollama') {
@@ -171,7 +177,7 @@ export function mountImportWizard() {
       return;
     }
     const tbl = document.createElement('table');
-    tbl.className = 'grid';
+    // Avoid using class "grid" here (CSS grid) to prevent text overlap in preview tables
     const cells = state.table.cells;
     for (let r = 0; r < Math.min(40, cells.length); r++) {
       const tr = document.createElement('tr');
@@ -400,7 +406,7 @@ export function mountImportWizardEmbedded(container) {
     function renderPreviewEmbedded(){
       const wrap = container.querySelector('#pdfwiz-preview'); wrap.innerHTML='';
       if (!table || !table.cells || !table.cells.length) { wrap.innerHTML='<div class="info">Tablo bulunamadı.</div>'; return; }
-      const tbl = document.createElement('table'); tbl.className='grid';
+      const tbl = document.createElement('table');
       for (let r=0; r<Math.min(40, table.cells.length); r++){ const tr=document.createElement('tr'); const row=table.cells[r]; for(let c=0;c<Math.min(12,row.length);c++){ const td=document.createElement(r===0?'th':'td'); td.textContent=row[c]; tr.appendChild(td);} tbl.appendChild(tr);} wrap.appendChild(tbl);
       const headers = table.cells[0]||[]; const m=mapHeaders(headers); const mapBox = container.querySelector('#pdfwiz-map'); mapBox.innerHTML = renderMapUI(headers, m); mapBox.querySelector('#apply-map')?.addEventListener('click', ()=> applyMap(headers));
     }
