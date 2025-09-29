@@ -414,7 +414,6 @@ export function mountImportWizardEmbedded(container) {
 // expose for non-module callers
 // eslint-disable-next-line no-undef
 window.PDFImportUI = { mountOverlay: mountImportWizard, mountEmbedded: mountImportWizardEmbedded };
-window.PaddleOCRClient = { setBase: setPaddleBase, getBase: getPaddleBase, healthy: serverHealthy };
 
 function renderValidation({ errors, warnings }) {
   const list = [];
