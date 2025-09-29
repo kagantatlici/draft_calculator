@@ -49,14 +49,15 @@ for name, url in urls.items():
     print('missing model files for', name, file=sys.stderr); sys.exit(2)
   onnx_out = outdir / f'{name}.onnx'
   print('convert to onnx', name)
+  import os
   cmd = [
     'paddle2onnx',
-    '--model_filename', pdmodel,
-    '--params_filename', pdiparams,
+    '--model_dir', os.path.dirname(pdmodel),
+    '--model_filename', os.path.basename(pdmodel),
+    '--params_filename', os.path.basename(pdiparams),
     '--save_file', str(onnx_out),
     '--opset_version', '11',
     '--enable_onnx_checker', 'True'
   ]
   subprocess.check_call(cmd)
   print('ok', name, onnx_out)
-
