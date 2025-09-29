@@ -44,10 +44,24 @@ export function mountImportWizard() {
       if (!f) return;
       state.file = f;
       overlay.querySelector('#pdfwiz-status').textContent = `Yükleniyor: ${f.name}`;
-      state.pdf = await loadPdf(f);
-      await populateThumbs();
-      // ROI seçimi artık zorunlu değil; yönteme geç
-      gotoStep(3);
+      const isImage = /^image\//i.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name || '');
+      if (isImage) {
+        // Image mode: bypass pdf.js, send blob directly
+        state.pdf = null;
+        state.pageNo = 1;
+        state.kind = 'scan';
+        // Clear thumbs
+        const grid = overlay.querySelector('#pdfwiz-thumbs'); if (grid) grid.innerHTML = '';
+        overlay.querySelector('#pdfwiz-kind').textContent = 'Görüntü (PNG/JPG)';
+        // Go choose method and extract
+        gotoStep(2);
+      } else {
+        // PDF mode
+        state.pdf = await loadPdf(f);
+        await populateThumbs();
+        // ROI seçimi artık zorunlu değil; yönteme geç
+        gotoStep(2);
+      }
     });
     // Search
     overlay.querySelector('#pdfwiz-search')?.addEventListener('input', onSearch);
@@ -80,9 +94,11 @@ export function mountImportWizard() {
   async function selectPage(no) {
     state.pageNo = no;
     overlay.querySelector('#pdfwiz-pageno').textContent = String(no);
-    const items = await getPageTextItems(state.pdf, no);
-    state.kind = detectPdfKind(items);
-    overlay.querySelector('#pdfwiz-kind').textContent = state.kind === 'vector' ? 'Metin tabanlı' : 'Taranmış';
+    if (state.pdf) {
+      const items = await getPageTextItems(state.pdf, no);
+      state.kind = detectPdfKind(items);
+      overlay.querySelector('#pdfwiz-kind').textContent = state.kind === 'vector' ? 'Metin tabanlı' : 'Taranmış';
+    }
     // ROI kaldırıldı
   }
 
@@ -92,7 +108,9 @@ export function mountImportWizard() {
     const method = overlay.querySelector('input[name="method"]:checked')?.value || 'client';
     const status = overlay.querySelector('#pdfwiz-status');
     status.textContent = 'Çıkarım çalışıyor...';
-    const image = await cropPageToImage(state.pdf, state.pageNo, null);
+    const image = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''))
+      ? state.file
+      : await cropPageToImage(state.pdf, state.pageNo, null);
     let table = null;
     try {
       if (method === 'client') {
@@ -227,8 +245,8 @@ export function mountImportWizard() {
     </div>
     <div class="pdfwiz-body">
       <div class="pdfwiz-step" data-step="1" style="display:block;">
-        <h3>1) PDF Yükle + Sayfa Seç</h3>
-        <input id="pdfwiz-file" type="file" accept="application/pdf" />
+        <h3>1) PDF/PNG Yükle + Sayfa Seç</h3>
+        <input id="pdfwiz-file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/*" />
         <div id="pdfwiz-thumbs" class="thumb-grid" aria-label="Sayfa küçük resimleri"></div>
         <div class="muted">Seçili sayfa: <span id="pdfwiz-pageno">-</span> • Tür: <span id="pdfwiz-kind">-</span></div>
         <div class="row">
@@ -296,24 +314,33 @@ export function mountImportWizardEmbedded(container) {
   (function bind() {
     const file = container.querySelector('#pdfwiz-file');
     const status = container.querySelector('#pdfwiz-status');
-    let pdfDoc = null, pageNo = 1, kind = 'scan', table = null;
+    let pdfDoc = null, pageNo = 1, kind = 'scan', table = null, imgBlob = null;
     file?.addEventListener('change', async (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       status.textContent = `Yükleniyor: ${f.name}`;
-      pdfDoc = await loadPdf(f);
-      const grid = container.querySelector('#pdfwiz-thumbs');
-      const canvases = await renderThumbnails(pdfDoc, grid);
-      canvases.forEach(cv => {
-        cv.classList.add('thumb'); cv.setAttribute('tabindex','0'); cv.setAttribute('role','button');
-        cv.addEventListener('click', ()=> selectPage(Number(cv.dataset.pageNo)));
-        cv.addEventListener('keydown', (ev)=>{ if (ev.key==='Enter'||ev.key===' ') selectPage(Number(cv.dataset.pageNo)); });
-      });
-      selectPage(1);
+      const isImage = /^image\//i.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name||'');
+      if (isImage) {
+        imgBlob = f; pdfDoc = null; pageNo = 1; kind = 'scan';
+        const grid = container.querySelector('#pdfwiz-thumbs'); if (grid) grid.innerHTML='';
+        container.querySelector('#pdfwiz-kind').textContent = 'Görüntü (PNG/JPG)';
+      } else {
+        imgBlob = null; pdfDoc = await loadPdf(f);
+        const grid = container.querySelector('#pdfwiz-thumbs');
+        const canvases = await renderThumbnails(pdfDoc, grid);
+        canvases.forEach(cv => {
+          cv.classList.add('thumb'); cv.setAttribute('tabindex','0'); cv.setAttribute('role','button');
+          cv.addEventListener('click', ()=> selectPage(Number(cv.dataset.pageNo)));
+          cv.addEventListener('keydown', (ev)=>{ if (ev.key==='Enter'||ev.key===' ') selectPage(Number(cv.dataset.pageNo)); });
+        });
+        selectPage(1);
+      }
     });
     async function selectPage(no){
       pageNo = no; container.querySelector('#pdfwiz-pageno').textContent = String(no);
-      const items = await getPageTextItems(pdfDoc, no); kind = detectPdfKind(items);
-      container.querySelector('#pdfwiz-kind').textContent = kind==='vector'?'Metin tabanlı':'Taranmış';
+      if (pdfDoc) {
+        const items = await getPageTextItems(pdfDoc, no); kind = detectPdfKind(items);
+        container.querySelector('#pdfwiz-kind').textContent = kind==='vector'?'Metin tabanlı':'Taranmış';
+      }
       // ROI removed
     }
     async function renderRoiCanvas(){ /* ROI removed */ }
@@ -321,11 +348,11 @@ export function mountImportWizardEmbedded(container) {
     container.querySelector('#go-extract')?.addEventListener('click', async ()=>{
       const method = container.querySelector('input[name="method"]:checked')?.value || 'client';
       status.textContent = 'Çıkarım çalışıyor...';
-      const image = await cropPageToImage(pdfDoc, pageNo, null);
+      const image = imgBlob ? imgBlob : await cropPageToImage(pdfDoc, pageNo, null);
       try {
         if (method==='client') {
           const items = await getPageTextItems(pdfDoc, pageNo);
-          table = (kind==='vector')? clusterToTable(items) : tableFromClient(image);
+          table = (!pdfDoc || kind!=='vector') ? tableFromClient(image) : clusterToTable(items);
         } else {
           try { table = await ocrHFSpace(image, null); }
           catch(_) { table = tableFromClient(image); status.textContent='Bulut OCR yok → tarayıcı-içi sonuç'; }
