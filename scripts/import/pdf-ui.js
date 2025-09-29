@@ -139,15 +139,9 @@ export function mountImportWizard() {
           const out = await ollamaExtractTable(image, {});
           table = { cells: out.cells || [], csv: (out.text||''), bboxes: [], confidence: null };
         } catch (err) {
-          console.warn('Ollama erişilemedi, Bulut OCR’a düşülüyor', err);
-          try {
-            table = await ocrHFSpace(image, null);
-            const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'VLM başarısız → HF Space (PaddleOCR) sonucu';
-          } catch (err2) {
-            const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
-            table = tableFromOcr(ocr.words, null, { useOpenCV: true });
-            const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'VLM ve Bulut OCR yok → Tarayıcı-içi OCR sonucu';
-          }
+          console.warn('VLM (Ollama) başarısız', err);
+          status.textContent = 'VLM (Ollama) başarısız: ' + (err.message || err);
+          return; // no fallback
         }
       }
     } catch (err) {
@@ -385,10 +379,7 @@ export function mountImportWizardEmbedded(container) {
           try {
             const out = await ollamaExtractTable(image, {});
             table = { cells: out.cells||[], csv: (out.text||''), bboxes: [], confidence: null };
-          } catch(_) {
-            try { table = await ocrHFSpace(image, null); status.textContent='VLM yok → HF Space sonucu'; }
-            catch { table = tableFromClient(image); status.textContent='VLM & HF Space yok → tarayıcı-içi sonuç'; }
-          }
+          } catch(e) { status.textContent='VLM (Ollama) başarısız: ' + (e.message||e); return; }
         }
       } catch (e) { status.textContent = 'Hata: ' + (e.message||e); return; }
       renderPreviewEmbedded(); goto(3); status.textContent='Bitti.';
