@@ -314,21 +314,9 @@ export function mountImportWizardEmbedded(container) {
       pageNo = no; container.querySelector('#pdfwiz-pageno').textContent = String(no);
       const items = await getPageTextItems(pdfDoc, no); kind = detectPdfKind(items);
       container.querySelector('#pdfwiz-kind').textContent = kind==='vector'?'Metin tabanlı':'Taranmış';
-      await renderRoiCanvas();
+      // ROI removed
     }
-    async function renderRoiCanvas(){
-      const page = await pdfDoc.getPage(pageNo);
-      const viewport = page.getViewport({ scale: 0.9 });
-      const canvas = container.querySelector('#pdfwiz-roi');
-      canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d'); await page.render({ canvasContext: ctx, viewport }).promise;
-      let dragging=false, start=null, rect=null;
-      canvas.onmousedown=(e)=>{dragging=true; start=getPos(e)}; canvas.onmousemove=(e)=>{if(!dragging)return; rect=mkRect(start,getPos(e)); drawOverlay()}; canvas.onmouseup=(e)=>{if(!dragging)return; dragging=false; rect=mkRect(start,getPos(e)); roi=normRect(rect,canvas); drawOverlay()}; canvas.onmouseleave=()=>{dragging=false};
-      function getPos(ev){ const r=canvas.getBoundingClientRect(); return {x:ev.clientX-r.left,y:ev.clientY-r.top}; }
-      function mkRect(a,b){ return {x:Math.min(a.x,b.x), y:Math.min(a.y,b.y), w:Math.abs(a.x-b.x), h:Math.abs(a.y-b.y)}; }
-      function normRect(rc,cv){ return { x:rc.x/cv.width, y:rc.y/cv.height, w:rc.w/cv.width, h:rc.h/cv.height }; }
-      function drawOverlay(){ ctx.save(); ctx.strokeStyle='#22d3ee'; ctx.lineWidth=2; ctx.setLineDash([6,3]); ctx.clearRect(0,0,canvas.width,canvas.height); page.render({ canvasContext: ctx, viewport }); if(rect) ctx.strokeRect(rect.x,rect.y,rect.w,rect.h); ctx.restore(); }
-    }
+    async function renderRoiCanvas(){ /* ROI removed */ }
     container.querySelector('#go-method')?.addEventListener('click', ()=> goto(2));
     container.querySelector('#go-extract')?.addEventListener('click', async ()=>{
       const method = container.querySelector('input[name="method"]:checked')?.value || 'client';
