@@ -23,7 +23,7 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install paddlepaddle==2.6.1 paddle2onnx==1.0.9 requests tqdm
+          pip install paddlepaddle==2.6.1 paddle2onnx==1.0.9 requests tqdm six onnx==1.16.0
 
       - name: Build ONNX models
         run: |
@@ -101,4 +101,3 @@ jobs:
             dist/models/table.onnx
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
