@@ -68,12 +68,9 @@ export function mountImportWizard() {
     // Search
     overlay.querySelector('#pdfwiz-search')?.addEventListener('input', onSearch);
     // Method toggles
-    const hint = overlay.querySelector('#paddle-hint');
+    const hint = overlay.querySelector('#lp-hint');
     const ok = await hfHealthy();
-    if (hint) hint.textContent = ok ? `Bulut OCR hazır: ${getHFBase()}` : 'Bulut OCR ulaşılamıyor; tarayıcı-içi yöntem kullanılacak.';
-    const hintO = overlay.querySelector('#ollama-hint');
-    const okO = await ollamaHealthy();
-    if (hintO) hintO.textContent = okO ? `Ollama hazır: ${getOllamaBase()} (model: ${getOllamaModel()})` : 'Ollama bulunamadı (http://127.0.0.1:11434). HTTPS sayfadan erişim tarayıcı tarafından engellenebilir.';
+    if (hint) hint.textContent = ok ? `LlamaParse proxy: ${getHFBase()}` : 'Space ulaşılamıyor.';
     // Next buttons (ROI adımı kaldırıldı)
     overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(2));
     overlay.querySelector('#go-extract')?.addEventListener('click', runExtraction);
@@ -127,36 +124,13 @@ export function mountImportWizard() {
           const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
           table = tableFromOcr(ocr.words, null, { useOpenCV: true });
         }
-      } else if (method === 'paddle') {
-        try { table = await ocrHFSpace(image, null); }
-        catch (err) {
-          console.warn('Bulut OCR erişilemedi, tarayıcı-içi OCR’a düşülüyor', err);
-          const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
-          table = tableFromOcr(ocr.words, null, { useOpenCV: true });
-          const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Bulut OCR yok → Tarayıcı-içi OCR sonucu';
-        }
-      } else if (method === 'structure') {
+      } else if (method === 'llamaparse') {
         try {
-          table = await ocrHFStructure(image);
+          const f = state.file || image;
+          table = await parseWithLlamaParse(f);
           const norm = normalizeHydroCells(table.cells);
-          if (Array.isArray(norm) && norm.length >= 2) {
-            const head = (norm[0]||[]).map(x=> String(x||'').toLowerCase());
-            const body = norm.slice(1);
-            const hasTPC = body.some(r=> r.some(c=> /tpc/i.test(String(c))));
-            const hasMCT = body.some(r=> r.some(c=> /(mct|mtc)/i.test(String(c))));
-            if (hasTPC && hasMCT) table.cells = norm; // only adopt if key rows present
-          }
-        }
-        catch (err) { status.textContent = 'Structure API hatası: ' + (err.message || err); return; }
-      } else if (method === 'ollama') {
-        try {
-          const out = await ollamaExtractTable(image, {});
-          table = { cells: out.cells || [], csv: (out.text||''), bboxes: [], confidence: null };
-        } catch (err) {
-          console.warn('VLM (Ollama) başarısız', err);
-          status.textContent = 'VLM (Ollama) başarısız: ' + (err.message || err);
-          return; // no fallback
-        }
+          if (norm && norm.length) table.cells = norm;
+        } catch (err) { status.textContent = 'LlamaParse hatası: ' + (err.message || err); return; }
       }
     } catch (err) {
       console.error(err);
@@ -283,12 +257,9 @@ export function mountImportWizard() {
       </div>
       <div class="pdfwiz-step" data-step="2" style="display:none;">
         <h3>2) Çıkarım Yöntemi</h3>
-        <label><input type="radio" name="method" value="client" checked /> Hızlı Tara (Tarayıcı-içi)</label>
-        <label title="Bulut OCR (HF Space)"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (PaddleOCR)</label>
-        <label title="Tablo Çıkarıcı (HF Space)"><input type="radio" id="method-structure" name="method" value="structure" /> Tablo Çıkarıcı (Structure)</label>
-        <label title="Yerel VLM (Ollama)"><input type="radio" id="method-ollama" name="method" value="ollama" /> VLM (Ollama)</label>
-        <div id="paddle-hint" class="muted"></div>
-        <div id="ollama-hint" class="muted"></div>
+        <label title="LlamaParse (SaaS)"><input type="radio" id="method-llamaparse" name="method" value="llamaparse" checked /> LlamaParse (SaaS)</label>
+        <label><input type="radio" name="method" value="client" /> Hızlı Tara (Tarayıcı‑içi)</label>
+        <div id="lp-hint" class="muted"></div>
         <div class="row"><button id="go-extract">Tabloyu Çıkar ➜</button></div>
       </div>
       <div class="pdfwiz-step" data-step="3" style="display:none;">
@@ -387,17 +358,12 @@ export function mountImportWizardEmbedded(container) {
           } else {
             table = tableFromClient(image);
           }
-        } else if (method==='paddle') {
-          try { table = await ocrHFSpace(image, null); }
-          catch(_) { table = tableFromClient(image); status.textContent='Bulut OCR yok → tarayıcı-içi sonuç'; }
-        } else if (method==='structure') {
-          try { table = await ocrHFStructure(image); }
-          catch(e) { status.textContent='Structure API hatası: ' + (e.message||e); return; }
-        } else if (method==='ollama') {
+        } else if (method==='llamaparse') {
           try {
-            const out = await ollamaExtractTable(image, {});
-            table = { cells: out.cells||[], csv: (out.text||''), bboxes: [], confidence: null };
-          } catch(e) { status.textContent='VLM (Ollama) başarısız: ' + (e.message||e); return; }
+            const f = imgBlob || (await cropPageToImage(pdfDoc, pageNo, null));
+            const out = await parseWithLlamaParse(f);
+            table = { cells: out.cells||[], csv: (out.markdown||''), bboxes: [], confidence: null };
+          } catch(e) { status.textContent='LlamaParse hatası: ' + (e.message||e); return; }
         }
       } catch (e) { status.textContent = 'Hata: ' + (e.message||e); return; }
       renderPreviewEmbedded(); goto(3); status.textContent='Bitti.';
