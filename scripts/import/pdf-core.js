@@ -86,9 +86,32 @@ export function detectPdfKind(textItems) {
  * @param {number} [scale] default 2.0 for better OCR
  * @returns {Promise<Blob>} PNG blob
  */
-export async function cropPageToImage(pdf, pageNo, bbox, scale = 2.0) {
+export async function cropPageToImage(pdf, pageNo, bbox, scale = undefined) {
   const page = await pdf.getPage(pageNo);
-  const viewport = page.getViewport({ scale });
+  // Determine an OCR-friendly scale if not provided: aim for a high-DPI raster
+  // so that small text and thin grid lines survive later resampling.
+  let effScale = Number(scale);
+  if (!isFinite(effScale) || effScale <= 0) {
+    // Allow user override via localStorage
+    try {
+      const s = Number(localStorage.getItem('OCR_SCALE') || '');
+      if (isFinite(s) && s > 0) effScale = s;
+    } catch (_) { /* ignore */ }
+    if (!isFinite(effScale) || effScale <= 0) {
+      // Compute scale to reach a target long edge in pixels at scale 1.0
+      const vp1 = page.getViewport({ scale: 1.0 });
+      const long1 = Math.max(vp1.width, vp1.height);
+      let target = 3200; // default target long edge in px (~300 DPI for A4)
+      try {
+        const t = Number(localStorage.getItem('OCR_LONG_EDGE') || '');
+        if (isFinite(t) && t > 0) target = t;
+      } catch (_) { /* ignore */ }
+      effScale = target / Math.max(1, long1);
+      // Clamp to keep memory/latency reasonable
+      effScale = Math.max(2.0, Math.min(5.0, effScale));
+    }
+  }
+  const viewport = page.getViewport({ scale: effScale });
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
@@ -114,4 +137,3 @@ export async function cropPageToImage(pdf, pageNo, bbox, scale = 2.0) {
   octx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
   return await new Promise(res => out.toBlob(b => res(b), 'image/png'));
 }
-
