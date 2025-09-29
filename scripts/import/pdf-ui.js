@@ -8,7 +8,7 @@ import { loadPdf, renderThumbnails, getPageTextItems, detectPdfKind, cropPageToI
 import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
-import { ocrHFSpace, hfHealthy, getHFBase } from './hfspace-service.js';
+import { ocrHFSpace, ocrHFStructure, hfHealthy, getHFBase } from './hfspace-service.js';
 import { ollamaExtractTable, ollamaHealthy, getOllamaBase, getOllamaModel } from './ollama-service.js';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
@@ -134,6 +134,9 @@ export function mountImportWizard() {
           table = tableFromOcr(ocr.words, null, { useOpenCV: true });
           const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Bulut OCR yok → Tarayıcı-içi OCR sonucu';
         }
+      } else if (method === 'structure') {
+        try { table = await ocrHFStructure(image); }
+        catch (err) { status.textContent = 'Structure API hatası: ' + (err.message || err); return; }
       } else if (method === 'ollama') {
         try {
           const out = await ollamaExtractTable(image, {});
@@ -270,7 +273,8 @@ export function mountImportWizard() {
       <div class="pdfwiz-step" data-step="2" style="display:none;">
         <h3>2) Çıkarım Yöntemi</h3>
         <label><input type="radio" name="method" value="client" checked /> Hızlı Tara (Tarayıcı-içi)</label>
-        <label title="Bulut OCR (HF Space)"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (Bulut OCR)</label>
+        <label title="Bulut OCR (HF Space)"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (PaddleOCR)</label>
+        <label title="Tablo Çıkarıcı (HF Space)"><input type="radio" id="method-structure" name="method" value="structure" /> Tablo Çıkarıcı (Structure)</label>
         <label title="Yerel VLM (Ollama)"><input type="radio" id="method-ollama" name="method" value="ollama" /> VLM (Ollama)</label>
         <div id="paddle-hint" class="muted"></div>
         <div id="ollama-hint" class="muted"></div>
@@ -375,6 +379,9 @@ export function mountImportWizardEmbedded(container) {
         } else if (method==='paddle') {
           try { table = await ocrHFSpace(image, null); }
           catch(_) { table = tableFromClient(image); status.textContent='Bulut OCR yok → tarayıcı-içi sonuç'; }
+        } else if (method==='structure') {
+          try { table = await ocrHFStructure(image); }
+          catch(e) { status.textContent='Structure API hatası: ' + (e.message||e); return; }
         } else if (method==='ollama') {
           try {
             const out = await ollamaExtractTable(image, {});

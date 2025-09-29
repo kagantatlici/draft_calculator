@@ -107,6 +107,18 @@ export async function ocrHFSpace(imageBlob, _roi) {
   return js;
 }
 
+// Structure-first (Table Transformer) endpoint
+export async function ocrHFStructure(imageBlob) {
+  const base = getHFBase().replace(/\/$/, '');
+  const fd = new FormData();
+  fd.append('file', imageBlob, 'page.png');
+  const res = await fetch(base + '/tt/table', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error('HF Space Structure API erişilemedi');
+  const js = await res.json();
+  if (!js.cells || !js.cells.length) js.cells = htmlTableToCells(js.html);
+  return js;
+}
+
 // Expose for UI binding
 // eslint-disable-next-line no-undef
 window.HFSpaceClient = { setBase: setHFBase, getBase: getHFBase, healthy: hfHealthy };
