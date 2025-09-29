@@ -28,20 +28,41 @@ jobs:
       - name: Build ONNX models
         run: |
           python - << 'PY'
-          import os, tarfile, requests, subprocess, sys, pathlib
-          urls = {
-            'det': 'https://paddleocr.bj.bcebos.com/PP-OCRv3/english/en_PP-OCRv3_det_infer.tar',
-            'rec': 'https://paddleocr.bj.bcebos.com/PP-OCRv3/rec/en/en_PP-OCRv3_rec_infer.tar',
-            'table': 'https://paddleocr.bj.bcebos.com/ppstructure/models/slanet/en_ppstructure_mobile_v2.0_SLANet_infer.tar',
+          import os, tarfile, requests, subprocess, sys, pathlib, time
+          url_sets = {
+            'det': [
+              'https://paddleocr.bj.bcebos.com/PP-OCRv3/english/en_PP-OCRv3_det_infer.tar',
+              'https://paddleocr.bj.bcebos.com/PP-OCRv3/det/en/en_PP-OCRv3_det_infer.tar',
+            ],
+            'rec': [
+              'https://paddleocr.bj.bcebos.com/PP-OCRv3/rec/en/en_PP-OCRv3_rec_infer.tar',
+              'https://paddleocr.bj.bcebos.com/PP-OCRv3/rec/english/en_PP-OCRv3_rec_infer.tar',
+              'https://paddleocr.bj.bcebos.com/PP-OCRv4/rec/en/en_PP-OCRv4_rec_infer.tar',
+              'https://paddleocr.bj.bcebos.com/PP-OCRv2/rec/en/en_PP-OCRv2_rec_infer.tar',
+            ],
+            'table': [
+              'https://paddleocr.bj.bcebos.com/ppstructure/models/slanet/en_ppstructure_mobile_v2.0_SLANet_infer.tar',
+            ],
           }
           outdir = pathlib.Path('dist/models'); outdir.mkdir(parents=True, exist_ok=True)
-          def download(url, dst_tar):
-            with requests.get(url, stream=True) as r:
-              r.raise_for_status()
-              with open(dst_tar, 'wb') as f:
-                for chunk in r.iter_content(1024*1024):
-                  if chunk:
-                    f.write(chunk)
+          def download_with_fallback(name, urls, dst_tar):
+            last_err = None
+            for url in urls:
+              try:
+                print(f'downloading {name} from {url}')
+                with requests.get(url, stream=True, timeout=60) as r:
+                  r.raise_for_status()
+                  with open(dst_tar, 'wb') as f:
+                    for chunk in r.iter_content(1024*1024):
+                      if chunk:
+                        f.write(chunk)
+                return url
+              except Exception as e:
+                last_err = e
+                print(f'failed {url}: {e}')
+                time.sleep(1)
+            print(f'no working URL for {name}', file=sys.stderr)
+            raise last_err or Exception('no url')
           def extract(tar_path, dst_dir):
             with tarfile.open(tar_path, 'r') as tar:
               def is_within_directory(directory, target):
@@ -60,11 +81,10 @@ jobs:
                 if fn.endswith('.pdmodel'): pdmodel = os.path.join(d, fn)
                 elif fn.endswith('.pdiparams'): pdiparams = os.path.join(d, fn)
             return pdmodel, pdiparams
-          for name, url in urls.items():
+          for name, urls in url_sets.items():
             tar_path = f'/tmp/{name}.tar'; dst_dir = f'/tmp/{name}'
             os.makedirs(dst_dir, exist_ok=True)
-            print('downloading', name)
-            download(url, tar_path)
+            used = download_with_fallback(name, urls, tar_path)
             print('extract', name)
             extract(tar_path, dst_dir)
             pdmodel, pdiparams = find_files(dst_dir)
