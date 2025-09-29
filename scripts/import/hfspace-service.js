@@ -56,19 +56,13 @@ function htmlTableToCells(html) {
  */
 export async function ocrHFSpace(imageBlob, _roi) {
   const base = getBaseHF();
-  const dataUrl = await blobToDataURL(imageBlob);
-
-  // Try Gradio v4 preferred endpoint then fallback
-  const payload = { data: [ dataUrl ] };
-  let url = base + '/api/predict/run';
-  let res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>null);
-  if (!res || !res.ok) throw new Error('HF Space API erişilemedi');
+  const fd = new FormData();
+  fd.append('file', imageBlob, 'page.png');
+  const res = await fetch(base.replace(/\/$/,'') + '/pp/table', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error('HF Space API erişilemedi');
   const js = await res.json();
-  const arr = js?.data || [];
-  const html = String(arr[0] ?? '');
-  const csv = String(arr[1] ?? '');
-  const cells = htmlTableToCells(html);
-  return { html, csv, cells, bboxes: [], confidence: 0 };
+  if (!js.cells || !js.cells.length) js.cells = htmlTableToCells(js.html);
+  return js;
 }
 
 // Expose for UI binding
