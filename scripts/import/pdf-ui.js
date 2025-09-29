@@ -55,9 +55,8 @@ export function mountImportWizard() {
     const hint = overlay.querySelector('#paddle-hint');
     const ok = await hfHealthy();
     if (hint) hint.textContent = ok ? `Bulut OCR hazır: ${getHFBase()}` : 'Bulut OCR ulaşılamıyor; tarayıcı-içi yöntem kullanılacak.';
-    // Next buttons
-    overlay.querySelector('#go-roi')?.addEventListener('click', ()=> gotoStep(2));
-    overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(3));
+    // Next buttons (ROI adımı kaldırıldı)
+    overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(2));
     overlay.querySelector('#go-extract')?.addEventListener('click', runExtraction);
     overlay.querySelector('#go-apply')?.addEventListener('click', applyToApp);
     overlay.querySelector('#go-download')?.addEventListener('click', downloadJson);
@@ -84,44 +83,16 @@ export function mountImportWizard() {
     const items = await getPageTextItems(state.pdf, no);
     state.kind = detectPdfKind(items);
     overlay.querySelector('#pdfwiz-kind').textContent = state.kind === 'vector' ? 'Metin tabanlı' : 'Taranmış';
-    // ROI canvas preview
-    await renderRoiCanvas();
+    // ROI kaldırıldı
   }
 
-  async function renderRoiCanvas() {
-    const page = await state.pdf.getPage(state.pageNo);
-    const viewport = page.getViewport({ scale: 0.9 });
-    const canvas = overlay.querySelector('#pdfwiz-roi');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    // Attach ROI draw
-    let dragging = false; let start = null; let rect = null;
-    canvas.onmousedown = (e) => { dragging = true; start = getPos(e); };
-    canvas.onmousemove = (e) => { if (!dragging) return; rect = mkRect(start, getPos(e)); drawOverlay(); };
-    canvas.onmouseup = (e) => { if (!dragging) return; dragging = false; rect = mkRect(start, getPos(e)); state.roi = normRect(rect, canvas); drawOverlay(); };
-    canvas.onmouseleave = () => { dragging = false; };
-    function getPos(ev){ const r = canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
-    function mkRect(a,b){ return { x: Math.min(a.x,b.x), y: Math.min(a.y,b.y), w: Math.abs(a.x-b.x), h: Math.abs(a.y-b.y) }; }
-    function normRect(rc, cv){ return { x: rc.x/cv.width, y: rc.y/cv.height, w: rc.w/cv.width, h: rc.h/cv.height }; }
-    function drawOverlay(){
-      ctx.save();
-      ctx.strokeStyle = '#22d3ee'; ctx.lineWidth = 2; ctx.setLineDash([6,3]);
-      // redraw page for clarity
-      // Not re-rendering PDF for perf; draw rect only
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      page.render({ canvasContext: ctx, viewport });
-      if (rect) ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-      ctx.restore();
-    }
-  }
+  // ROI fonksiyonları kaldırıldı
 
   async function runExtraction() {
     const method = overlay.querySelector('input[name="method"]:checked')?.value || 'client';
     const status = overlay.querySelector('#pdfwiz-status');
     status.textContent = 'Çıkarım çalışıyor...';
-    const image = await cropPageToImage(state.pdf, state.pageNo, state.roi);
+    const image = await cropPageToImage(state.pdf, state.pageNo, null);
     let table = null;
     try {
       if (method === 'client') {
@@ -131,14 +102,14 @@ export function mountImportWizard() {
           table = clusterToTable(items);
         } else {
           const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
-          table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
+          table = tableFromOcr(ocr.words, null, { useOpenCV: true });
         }
       } else if (method === 'paddle') {
-        try { table = await ocrHFSpace(image, state.roi); }
+        try { table = await ocrHFSpace(image, null); }
         catch (err) {
           console.warn('Bulut OCR erişilemedi, tarayıcı-içi OCR’a düşülüyor', err);
           const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
-          table = tableFromOcr(ocr.words, state.roi, { useOpenCV: true });
+          table = tableFromOcr(ocr.words, null, { useOpenCV: true });
           const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Bulut OCR yok → Tarayıcı-içi OCR sonucu';
         }
       }
@@ -149,7 +120,7 @@ export function mountImportWizard() {
     }
     state.table = table || { cells: [], csv: '', bboxes: [], confidence: 0 };
     renderTablePreview();
-    gotoStep(4);
+    gotoStep(3);
     status.textContent = 'Bitti.';
   }
 
@@ -157,7 +128,7 @@ export function mountImportWizard() {
     const wrap = overlay.querySelector('#pdfwiz-preview');
     wrap.innerHTML = '';
     if (!state.table || !state.table.cells || !state.table.cells.length) {
-      wrap.innerHTML = '<div class="info">Tablo tespit edilemedi. ROI alanını ayarlayın veya farklı yöntem deneyin.</div>';
+      wrap.innerHTML = '<div class="info">Tablo tespit edilemedi. Farklı yöntem deneyin.</div>';
       return;
     }
     const tbl = document.createElement('table');
@@ -262,25 +233,18 @@ export function mountImportWizard() {
         <div class="muted">Seçili sayfa: <span id="pdfwiz-pageno">-</span> • Tür: <span id="pdfwiz-kind">-</span></div>
         <div class="row">
           <input id="pdfwiz-search" type="search" placeholder="Anahtar kelime (Hydrostatic, TPC, MCT...)" />
-          <button id="go-roi">Devam ➜</button>
-        </div>
-      </div>
-      <div class="pdfwiz-step" data-step="2" style="display:none;">
-        <h3>2) Bölge Seç (Tablo ROI)</h3>
-        <canvas id="pdfwiz-roi" class="roi-canvas" aria-label="Tablo bölge seçimi"></canvas>
-        <div class="row">
           <button id="go-method">Devam ➜</button>
         </div>
       </div>
-      <div class="pdfwiz-step" data-step="3" style="display:none;">
-        <h3>3) Çıkarım Yöntemi</h3>
+      <div class="pdfwiz-step" data-step="2" style="display:none;">
+        <h3>2) Çıkarım Yöntemi</h3>
         <label><input type="radio" name="method" value="client" checked /> Hızlı Tara (Tarayıcı-içi)</label>
         <label title="Bulut OCR (HF Space)"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (Bulut OCR)</label>
         <div id="paddle-hint" class="muted"></div>
         <div class="row"><button id="go-extract">Tabloyu Çıkar ➜</button></div>
       </div>
-      <div class="pdfwiz-step" data-step="4" style="display:none;">
-        <h3>4) Önizleme + Eşleme + Doğrulama</h3>
+      <div class="pdfwiz-step" data-step="3" style="display:none;">
+        <h3>3) Önizleme + Eşleme + Doğrulama</h3>
         <div id="pdfwiz-preview"></div>
         <div id="pdfwiz-map"></div>
         <div id="pdfwiz-validate"></div>
@@ -332,7 +296,7 @@ export function mountImportWizardEmbedded(container) {
   (function bind() {
     const file = container.querySelector('#pdfwiz-file');
     const status = container.querySelector('#pdfwiz-status');
-    let pdfDoc = null, pageNo = 1, roi = null, kind = 'scan', table = null;
+    let pdfDoc = null, pageNo = 1, kind = 'scan', table = null;
     file?.addEventListener('change', async (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       status.textContent = `Yükleniyor: ${f.name}`;
@@ -365,24 +329,23 @@ export function mountImportWizardEmbedded(container) {
       function normRect(rc,cv){ return { x:rc.x/cv.width, y:rc.y/cv.height, w:rc.w/cv.width, h:rc.h/cv.height }; }
       function drawOverlay(){ ctx.save(); ctx.strokeStyle='#22d3ee'; ctx.lineWidth=2; ctx.setLineDash([6,3]); ctx.clearRect(0,0,canvas.width,canvas.height); page.render({ canvasContext: ctx, viewport }); if(rect) ctx.strokeRect(rect.x,rect.y,rect.w,rect.h); ctx.restore(); }
     }
-    container.querySelector('#go-roi')?.addEventListener('click', ()=> goto(2));
-    container.querySelector('#go-method')?.addEventListener('click', ()=> goto(3));
+    container.querySelector('#go-method')?.addEventListener('click', ()=> goto(2));
     container.querySelector('#go-extract')?.addEventListener('click', async ()=>{
       const method = container.querySelector('input[name="method"]:checked')?.value || 'client';
       status.textContent = 'Çıkarım çalışıyor...';
-      const image = await cropPageToImage(pdfDoc, pageNo, roi);
+      const image = await cropPageToImage(pdfDoc, pageNo, null);
       try {
         if (method==='client') {
           const items = await getPageTextItems(pdfDoc, pageNo);
-          table = (kind==='vector')? clusterToTable(items) : tableFromClient(image, roi);
+          table = (kind==='vector')? clusterToTable(items) : tableFromClient(image);
         } else {
-          try { table = await ocrPaddle(image, roi); }
-          catch(_) { table = tableFromClient(image, roi); status.textContent='PaddleOCR yok → tarayıcı-içi sonuç'; }
+          try { table = await ocrHFSpace(image, null); }
+          catch(_) { table = tableFromClient(image); status.textContent='Bulut OCR yok → tarayıcı-içi sonuç'; }
         }
       } catch (e) { status.textContent = 'Hata: ' + (e.message||e); return; }
-      renderPreviewEmbedded(); goto(4); status.textContent='Bitti.';
+      renderPreviewEmbedded(); goto(3); status.textContent='Bitti.';
     });
-    function tableFromClient(image, roi){ return ocrClient(image,{lang:'eng+tur',psm:6}).then(ocr=> tableFromOcr(ocr.words, roi, {useOpenCV:true})); }
+    function tableFromClient(image){ return ocrClient(image,{lang:'eng+tur',psm:6}).then(ocr=> tableFromOcr(ocr.words, null, {useOpenCV:true})); }
     function renderPreviewEmbedded(){
       const wrap = container.querySelector('#pdfwiz-preview'); wrap.innerHTML='';
       if (!table || !table.cells || !table.cells.length) { wrap.innerHTML='<div class="info">Tablo bulunamadı.</div>'; return; }
