@@ -101,7 +101,11 @@ export async function ocrHFSpace(imageBlob, _roi) {
   const fd = new FormData();
   fd.append('file', imageBlob, 'page.png');
   const res = await fetch(base + '/pp/table', { method: 'POST', body: fd });
-  if (!res.ok) throw new Error('HF Space API erişilemedi');
+  if (!res.ok) {
+    let msg = '';
+    try { msg = await res.text(); } catch (_) {}
+    throw new Error('HF Space API hatası: ' + (msg || (res.status + ' ' + res.statusText)));
+  }
   const js = await res.json();
   if (!js.cells || !js.cells.length) js.cells = htmlTableToCells(js.html);
   return js;
@@ -113,7 +117,11 @@ export async function ocrHFStructure(imageBlob) {
   const fd = new FormData();
   fd.append('file', imageBlob, 'page.png');
   const res = await fetch(base + '/tt/table', { method: 'POST', body: fd });
-  if (!res.ok) throw new Error('HF Space Structure API erişilemedi');
+  if (!res.ok) {
+    let msg = '';
+    try { msg = await res.text(); } catch (_) {}
+    throw new Error('Structure API hatası: ' + (msg || (res.status + ' ' + res.statusText)));
+  }
   const js = await res.json();
   if (!js.cells || !js.cells.length) js.cells = htmlTableToCells(js.html);
   return js;
