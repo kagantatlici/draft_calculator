@@ -14,14 +14,27 @@ RUN python -m pip install --no-cache-dir -U pip && \
       opencv-python-headless==4.10.0.84 paddleocr==2.7.0.3 \
       onnxruntime==1.18.1 requests==2.31.0 tqdm==4.66.4
 
-# Fetch prebuilt ONNX models from GitHub Releases (public)
-ENV GITHUB_REPO=kagantatlici/draft_calculator \
-    MODELS_TAG=models-v1
+# Option A (default): Fetch ONNX models from GitHub Releases
+# Option B: Copy local models committed under server/paddleocr/models (set MODELS_SOURCE=local)
+ARG MODELS_SOURCE=releases
+ENV MODELS_SOURCE=${MODELS_SOURCE}
+ENV GITHUB_REPO=kagantatlici/draft_calculator MODELS_TAG=models-v1
+
+# Copy app and optional local models directory
+COPY server/paddleocr/app.py /app/app.py
+COPY server/paddleocr/models/ /app/models/
+
 RUN set -eux; \
     mkdir -p /models; \
-    for f in det.onnx rec.onnx table.onnx; do \
-      curl -fSL -o /models/$f https://github.com/${GITHUB_REPO}/releases/download/${MODELS_TAG}/$f; \
-    done
+    if [ "${MODELS_SOURCE}" = "local" ]; then \
+      echo "Using local ONNX models from repo"; \
+      cp -v /app/models/*.onnx /models/; \
+    else \
+      echo "Fetching ONNX models from GitHub Releases"; \
+      for f in det.onnx rec.onnx table.onnx; do \
+        curl -fSL -o /models/$f https://github.com/${GITHUB_REPO}/releases/download/${MODELS_TAG}/$f; \
+      done; \
+    fi
 
 # Render builds with repo root as context; copy using repo-relative path.
 COPY server/paddleocr/app.py /app/app.py

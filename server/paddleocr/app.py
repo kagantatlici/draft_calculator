@@ -188,6 +188,11 @@ async def pp_table(file: UploadFile = File(...), roi: Optional[str] = Form(None)
     if isolate:
         ctx = mp.get_context('spawn')
         q = ctx.Queue()
+        # sanity check presence of ONNX models
+        for pth in ('/models/det.onnx','/models/rec.onnx','/models/table.onnx'):
+            if not os.path.exists(pth):
+                resp = JSONResponse(status_code=500, content={"error": f"Missing ONNX model: {pth}. Ensure MODELS_SOURCE=local with models in server/paddleocr/models, or MODELS_TAG matches a GitHub Release with assets det.onnx/rec.onnx/table.onnx."})
+                return _ensure_headers(resp)
         p = ctx.Process(target=_inference_child, args=(q, np_img))
         p.start()
         p.join(timeout=float(os.getenv("INFER_TIMEOUT", "55")))
