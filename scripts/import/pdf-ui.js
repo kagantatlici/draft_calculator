@@ -351,8 +351,12 @@ export function mountImportWizardEmbedded(container) {
       const image = imgBlob ? imgBlob : await cropPageToImage(pdfDoc, pageNo, null);
       try {
         if (method==='client') {
-          const items = await getPageTextItems(pdfDoc, pageNo);
-          table = (!pdfDoc || kind!=='vector') ? tableFromClient(image) : clusterToTable(items);
+          if (pdfDoc && kind === 'vector') {
+            const items = await getPageTextItems(pdfDoc, pageNo);
+            table = clusterToTable(items);
+          } else {
+            table = tableFromClient(image);
+          }
         } else {
           try { table = await ocrHFSpace(image, null); }
           catch(_) { table = tableFromClient(image); status.textContent='Bulut OCR yok → tarayıcı-içi sonuç'; }
