@@ -37,17 +37,58 @@ function blobToDataURL(blob) {
 
 function htmlTableToCells(html) {
   try {
-    const dom = new DOMParser().parseFromString(String(html||''), 'text/html');
+    const dom = new DOMParser().parseFromString(String(html || ''), 'text/html');
     const table = dom.querySelector('table');
     if (!table) return [];
-    const cells = [];
-    table.querySelectorAll('tr').forEach(tr => {
-      const row = [];
-      tr.querySelectorAll('th,td').forEach(td => row.push(td.textContent.trim()));
-      if (row.length) cells.push(row);
-    });
-    return cells;
-  } catch (_) { return []; }
+
+    const rows = [...table.querySelectorAll('tr')];
+    const grid = [];
+    let maxCols = 0;
+    const getSpan = (el, name) => {
+      const v = parseInt(el.getAttribute(name) || '1', 10);
+      return Number.isFinite(v) && v > 0 ? v : 1;
+    };
+
+    for (let r = 0; r < rows.length; r++) {
+      const tr = rows[r];
+      if (!grid[r]) grid[r] = [];
+      let c = 0;
+      const cells = [...tr.querySelectorAll('th,td')];
+      for (const cell of cells) {
+        // advance c to next free slot (may be occupied by a previous rowSpan)
+        while (grid[r][c] !== undefined) c++;
+        const colSpan = getSpan(cell, 'colspan');
+        const rowSpan = getSpan(cell, 'rowspan');
+        const text = (cell.textContent || '').trim();
+
+        for (let rr = 0; rr < rowSpan; rr++) {
+          const row = grid[r + rr] || (grid[r + rr] = []);
+          for (let cc = 0; cc < colSpan; cc++) {
+            // Fill the spanned grid positions. Repeat text so header spans align with body columns.
+            row[c + cc] = text;
+          }
+        }
+        c += colSpan;
+        if (grid[r].length > maxCols) maxCols = grid[r].length;
+      }
+      if (grid[r].length > maxCols) maxCols = grid[r].length;
+    }
+
+    // Normalize row widths and trim leading empty rows
+    const isEmpty = (v) => v == null || String(v).trim() === '';
+    const isEmptyRow = (row) => row.every(isEmpty);
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r] || [];
+      for (let c = 0; c < maxCols; c++) {
+        if (row[c] === undefined) row[c] = '';
+      }
+    }
+    while (grid.length && isEmptyRow(grid[0])) grid.shift();
+
+    return grid;
+  } catch (_) {
+    return [];
+  }
 }
 
 /**
