@@ -59,13 +59,9 @@ export async function ocrHFSpace(imageBlob, _roi) {
   const dataUrl = await blobToDataURL(imageBlob);
 
   // Try Gradio v4 preferred endpoint then fallback
-  const payload = { data: [ dataUrl ], fn_index: 0 }; // single button click
-  let url = base + '/api/predict/';
+  const payload = { data: [ dataUrl ] };
+  let url = base + '/api/predict/run';
   let res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>null);
-  if (!res || !res.ok) {
-    url = base + '/run/predict';
-    res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>null);
-  }
   if (!res || !res.ok) throw new Error('HF Space API erişilemedi');
   const js = await res.json();
   const arr = js?.data || [];
@@ -78,4 +74,3 @@ export async function ocrHFSpace(imageBlob, _roi) {
 // Expose for UI binding
 // eslint-disable-next-line no-undef
 window.HFSpaceClient = { setBase: setHFBase, getBase: getHFBase, healthy: hfHealthy };
-
