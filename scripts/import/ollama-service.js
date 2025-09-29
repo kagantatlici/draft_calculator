@@ -3,7 +3,7 @@
  * Calls the local Ollama HTTP API and tries to parse table output into cells.
  */
 
-const DEFAULT_OLLAMA_BASE = 'http://127.0.0.1:11434';
+const DEFAULT_OLLAMA_BASE = 'https://Kagantatlici-draft-calculator-ocr.hf.space';
 const DEFAULT_OLLAMA_MODEL = 'llama3.2-vision';
 
 export function getOllamaBase() {
@@ -115,4 +115,3 @@ function splitWhitespaceGrid(s){
 // expose helpers for debugging
 // eslint-disable-next-line no-undef
 window.OllamaClient = { getBase: getOllamaBase, setBase: setOllamaBase, getModel: getOllamaModel, setModel: setOllamaModel, healthy: ollamaHealthy };
-
