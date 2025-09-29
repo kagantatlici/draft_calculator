@@ -8,9 +8,9 @@ import { loadPdf, renderThumbnails, getPageTextItems, detectPdfKind, cropPageToI
 import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
-import { ocrHFSpace, ocrHFStructure, hfHealthy, getHFBase } from './hfspace-service.js';
-import { normalizeHydroCells } from './table-normalize.js';
-import { ollamaExtractTable, ollamaHealthy, getOllamaBase, getOllamaModel } from './ollama-service.js';
+import { hfHealthy, getHFBase } from './hfspace-service.js?v=lp2';
+import { normalizeHydroCells } from './table-normalize.js?v=lp2';
+import { parseWithLlamaParse } from './llamaparse-service.js?v=lp2';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
 
