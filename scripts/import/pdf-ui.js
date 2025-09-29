@@ -9,6 +9,7 @@ import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
 import { ocrHFSpace, ocrHFStructure, hfHealthy, getHFBase } from './hfspace-service.js';
+import { normalizeHydroCells } from './table-normalize.js';
 import { ollamaExtractTable, ollamaHealthy, getOllamaBase, getOllamaModel } from './ollama-service.js';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
@@ -135,7 +136,11 @@ export function mountImportWizard() {
           const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Bulut OCR yok → Tarayıcı-içi OCR sonucu';
         }
       } else if (method === 'structure') {
-        try { table = await ocrHFStructure(image); }
+        try {
+          table = await ocrHFStructure(image);
+          const norm = normalizeHydroCells(table.cells);
+          if (norm && norm.length) table.cells = norm;
+        }
         catch (err) { status.textContent = 'Structure API hatası: ' + (err.message || err); return; }
       } else if (method === 'ollama') {
         try {
