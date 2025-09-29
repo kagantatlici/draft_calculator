@@ -9,3 +9,4 @@ node_modules/
 *.docx
 tools/__pycache__/
 __pycache__/
+hf_space/
