@@ -9,6 +9,7 @@ import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
 import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
 import { ocrHFSpace, hfHealthy, getHFBase } from './hfspace-service.js';
+import { ollamaExtractTable, ollamaHealthy, getOllamaBase, getOllamaModel } from './ollama-service.js';
 
 // Keep overlay mount available but don't auto-bind to header (UX: open from Gemi Ekle)
 
@@ -69,6 +70,9 @@ export function mountImportWizard() {
     const hint = overlay.querySelector('#paddle-hint');
     const ok = await hfHealthy();
     if (hint) hint.textContent = ok ? `Bulut OCR hazır: ${getHFBase()}` : 'Bulut OCR ulaşılamıyor; tarayıcı-içi yöntem kullanılacak.';
+    const hintO = overlay.querySelector('#ollama-hint');
+    const okO = await ollamaHealthy();
+    if (hintO) hintO.textContent = okO ? `Ollama hazır: ${getOllamaBase()} (model: ${getOllamaModel()})` : 'Ollama bulunamadı (http://127.0.0.1:11434). HTTPS sayfadan erişim tarayıcı tarafından engellenebilir.';
     // Next buttons (ROI adımı kaldırıldı)
     overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(2));
     overlay.querySelector('#go-extract')?.addEventListener('click', runExtraction);
@@ -129,6 +133,16 @@ export function mountImportWizard() {
           const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
           table = tableFromOcr(ocr.words, null, { useOpenCV: true });
           const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Bulut OCR yok → Tarayıcı-içi OCR sonucu';
+        }
+      } else if (method === 'ollama') {
+        try {
+          const out = await ollamaExtractTable(image, {});
+          table = { cells: out.cells || [], csv: (out.text||''), bboxes: [], confidence: null };
+        } catch (err) {
+          console.warn('Ollama erişilemedi, tarayıcı-içi OCR’a düşülüyor', err);
+          const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 6 });
+          table = tableFromOcr(ocr.words, null, { useOpenCV: true });
+          const s = overlay.querySelector('#pdfwiz-status'); if (s) s.textContent = 'Ollama yok → Tarayıcı-içi OCR sonucu';
         }
       }
     } catch (err) {
@@ -258,7 +272,9 @@ export function mountImportWizard() {
         <h3>2) Çıkarım Yöntemi</h3>
         <label><input type="radio" name="method" value="client" checked /> Hızlı Tara (Tarayıcı-içi)</label>
         <label title="Bulut OCR (HF Space)"><input type="radio" id="method-paddle" name="method" value="paddle" /> Zor Dosya (Bulut OCR)</label>
+        <label title="Yerel VLM (Ollama)"><input type="radio" id="method-ollama" name="method" value="ollama" /> VLM (Ollama)</label>
         <div id="paddle-hint" class="muted"></div>
+        <div id="ollama-hint" class="muted"></div>
         <div class="row"><button id="go-extract">Tabloyu Çıkar ➜</button></div>
       </div>
       <div class="pdfwiz-step" data-step="3" style="display:none;">
@@ -357,9 +373,14 @@ export function mountImportWizardEmbedded(container) {
           } else {
             table = tableFromClient(image);
           }
-        } else {
+        } else if (method==='paddle') {
           try { table = await ocrHFSpace(image, null); }
           catch(_) { table = tableFromClient(image); status.textContent='Bulut OCR yok → tarayıcı-içi sonuç'; }
+        } else if (method==='ollama') {
+          try {
+            const out = await ollamaExtractTable(image, {});
+            table = { cells: out.cells||[], csv: (out.text||''), bboxes: [], confidence: null };
+          } catch(_) { table = tableFromClient(image); status.textContent='Ollama yok → tarayıcı-içi sonuç'; }
         }
       } catch (e) { status.textContent = 'Hata: ' + (e.message||e); return; }
       renderPreviewEmbedded(); goto(3); status.textContent='Bitti.';
