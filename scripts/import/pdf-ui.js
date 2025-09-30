@@ -163,15 +163,10 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
 
   function bindRoiInteractions(cv) {
     let dragging = false; let startX=0, startY=0; let curX=0, curY=0;
-    const overlayDraw = () => {
-      // redraw background page then ROI rectangle
-      const redraw = async () => { await renderRoiCanvas(); };
-      redraw();
-    };
     const onDown = (e) => {
       const rect = cv.getBoundingClientRect();
-      startX = (e.clientX - rect.left) / cv.width;
-      startY = (e.clientY - rect.top) / cv.height;
+      startX = (e.clientX - rect.left) / rect.width;
+      startY = (e.clientY - rect.top) / rect.height;
       curX = startX; curY = startY;
       dragging = true;
       e.preventDefault();
@@ -179,19 +174,13 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     const onMove = (e) => {
       if (!dragging) return;
       const rect = cv.getBoundingClientRect();
-      curX = (e.clientX - rect.left) / cv.width;
-      curY = (e.clientY - rect.top) / cv.height;
+      curX = (e.clientX - rect.left) / rect.width;
+      curY = (e.clientY - rect.top) / rect.height;
       const x = Math.min(startX, curX), y = Math.min(startY, curY);
       const w = Math.abs(curX - startX), h = Math.abs(curY - startY);
       state.rois[state.pageNo] = { x: clamp01(x), y: clamp01(y), w: clamp01(w), h: clamp01(h) };
-      // draw incremental rectangle on top
-      const ctx = cv.getContext('2d');
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6,4]);
-      ctx.strokeRect(x*cv.width, y*cv.height, w*cv.width, h*cv.height);
-      ctx.restore();
+      // redraw with ROI
+      renderRoiCanvas();
       e.preventDefault();
     };
     const onUp = () => { dragging = false; };
@@ -569,8 +558,8 @@ export function mountImportWizardEmbedded(container) {
     function bindRoiEmbedded(roiCanvas){
       let dragging=false, sx=0, sy=0, cx=0, cy=0;
       const clamp = (v)=> Math.max(0, Math.min(1, v));
-      const onDown = (e)=>{ const rect=roiCanvas.getBoundingClientRect(); sx=(e.clientX-rect.left)/roiCanvas.width; sy=(e.clientY-rect.top)/roiCanvas.height; cx=sx; cy=sy; dragging=true; e.preventDefault(); };
-      const onMove = (e)=>{ if(!dragging) return; const rect=roiCanvas.getBoundingClientRect(); cx=(e.clientX-rect.left)/roiCanvas.width; cy=(e.clientY-rect.top)/roiCanvas.height; const x=Math.min(sx,cx), y=Math.min(sy,cy), w=Math.abs(cx-sx), h=Math.abs(cy-sy); rois[pageNo]={x:clamp(x),y:clamp(y),w:clamp(w),h:clamp(h)}; const ctx=roiCanvas.getContext('2d'); ctx.save(); ctx.strokeStyle='#38bdf8'; ctx.setLineDash([6,4]); ctx.lineWidth=2; ctx.strokeRect(x*roiCanvas.width,y*roiCanvas.height,w*roiCanvas.width,h*roiCanvas.height); ctx.restore(); e.preventDefault(); };
+      const onDown = (e)=>{ const rect=roiCanvas.getBoundingClientRect(); sx=(e.clientX-rect.left)/rect.width; sy=(e.clientY-rect.top)/rect.height; cx=sx; cy=sy; dragging=true; e.preventDefault(); };
+      const onMove = (e)=>{ if(!dragging) return; const rect=roiCanvas.getBoundingClientRect(); cx=(e.clientX-rect.left)/rect.width; cy=(e.clientY-rect.top)/rect.height; const x=Math.min(sx,cx), y=Math.min(sy,cy), w=Math.abs(cx-sx), h=Math.abs(cy-sy); rois[pageNo]={x:clamp(x),y:clamp(y),w:clamp(w),h:clamp(h)}; renderRoiEmbedded(); e.preventDefault(); };
       const onUp = ()=>{ dragging=false; };
       roiCanvas.onmousedown = onDown; roiCanvas.onmousemove = onMove; roiCanvas.onmouseup=onUp; roiCanvas.onmouseleave=onUp;
       // touch support
