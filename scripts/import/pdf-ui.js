@@ -403,7 +403,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       }
     });
     // Interpolate missing values where possible
-    const { rows: filled, interpolatedIdx, info } = interpolateRows(rawRows);
+    const { rows: filled, interpolatedIdx, info, filledByField } = interpolateRows(rawRows);
     // Validate with skip of monotonic checks when neighbors are missing/interpolated
     const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100;
     const v = validateHydro(filled, { LBP: appLBP, skipMonotonicIfMissing: new Set([...missingIdx, ...interpolatedIdx]), originLabels });
@@ -414,8 +414,30 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     overlay.dataset.rows = JSON.stringify(filled);
     overlay.dataset.interp = JSON.stringify([...interpolatedIdx]);
     overlay.dataset.interpLabels = JSON.stringify([...interpolatedIdx].map(i => originLabels[i]));
-    // Refresh preview to apply row highlights
+    overlay.dataset.interpCells = JSON.stringify(Object.fromEntries(Object.entries(filledByField).map(([i,arr])=>[originLabels[Number(i)],arr])));
+    renderMappedPreview(filled, originLabels, filledByField);
     renderTablePreview();
+  }
+
+  function renderMappedPreview(filledRows, labels, filledByField) {
+    const box = overlay.querySelector('#pdfwiz-mapped');
+    if (!box) return;
+    if (!Array.isArray(filledRows) || !filledRows.length) { box.innerHTML = ''; return; }
+    const head = ['Draft (m)','LCF (m)','TPC (t/cm)','MCT1cm (t·m/cm)'];
+    const tbl = document.createElement('table'); tbl.className='pdf-table';
+    const trh = document.createElement('tr'); head.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); }); tbl.appendChild(trh);
+    const fmt=(n)=> (isFinite(n)? Number(n).toFixed(3).replace(/\.000$/,'') : '');
+    for(let i=0;i<Math.min(80, filledRows.length); i++){
+      const r = filledRows[i]; const tr=document.createElement('tr');
+      const label = labels[i]; const fields = (filledByField && filledByField[i]) || [];
+      const tdDraft=document.createElement('td'); tdDraft.textContent=fmt(r.draft_m); tr.appendChild(tdDraft);
+      const tdLcf=document.createElement('td'); tdLcf.textContent=fmt(r.lcf_m); if (fields.includes('lcf_m')) tdLcf.classList.add('interp-cell'); tr.appendChild(tdLcf);
+      const tdTpc=document.createElement('td'); tdTpc.textContent=fmt(r.tpc); if (fields.includes('tpc')) tdTpc.classList.add('interp-cell'); tr.appendChild(tdTpc);
+      const tdMct=document.createElement('td'); tdMct.textContent=fmt(r.mct); if (fields.includes('mct')) tdMct.classList.add('interp-cell'); tr.appendChild(tdMct);
+      tbl.appendChild(tr);
+    }
+    box.innerHTML = '<div class="muted" style="margin:6px 0;">Haritalanmış Tablo (doldurulmuş)</div>';
+    box.appendChild(tbl);
   }
 
   function applyToApp() {
@@ -502,9 +524,10 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
               </label>
             </div>
             <div id="pdfwiz-validate" style="margin-top:8px;"></div>
+            <div id="pdfwiz-mapped" style="margin-top:8px;"></div>
           </div>
         </div>
-        <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button><button id="pdfwiz-interp" class="secondary">Eksikleri Doldur (enterpolasyon)</button></div>
+        <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button></div>
       </div>
       <div id="pdfwiz-status" class="muted"></div>
     </div>

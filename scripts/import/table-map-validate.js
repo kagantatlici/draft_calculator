@@ -123,31 +123,32 @@ export function interpolateRows(rows) {
   const fields = ['tpc', 'mct', 'lcf_m'];
   const filled = rows.slice().map(r => ({ ...r }));
   const interpolatedIdx = new Set();
+  /** @type {Record<number,string[]>} */
+  const filledByField = {};
   const byDraft = filled.slice().sort((a,b)=> a.draft_m - b.draft_m);
   for (const f of fields) {
-    // gather indices where missing or non-positive for tpc/mct; for lcf allow zero but NaN interpolated
     const isMissing = (v)=> !(isFinite(v) && (f==='lcf_m' ? true : v>0));
-    // forward pass to find spans
     let i=0;
     while (i<byDraft.length) {
       while (i<byDraft.length && !isMissing(byDraft[i][f])) i++;
       if (i>=byDraft.length) break;
       const start = i-1;
       let j=i; while (j<byDraft.length && isMissing(byDraft[j][f])) j++;
-      const end = j; // first valid after missing span
+      const end = j;
       const a = start>=0 ? byDraft[start] : null;
       const b = end<byDraft.length ? byDraft[end] : null;
       if (a && b) {
         for (let k=i;k<end;k++){
           const t = (byDraft[k].draft_m - a.draft_m)/(b.draft_m - a.draft_m || 1);
           byDraft[k][f] = a[f] + (b[f]-a[f]) * t;
-          interpolatedIdx.add(filled.indexOf(byDraft[k]));
+          const idx = filled.indexOf(byDraft[k]);
+          interpolatedIdx.add(idx);
+          (filledByField[idx] ||= []).push(f);
         }
       }
       i = end+1;
     }
   }
-  // map back order preserved
   const info = interpolatedIdx.size>0 ? `Interpolasyon: ${interpolatedIdx.size} satır dolduruldu` : '';
-  return { rows: filled, interpolatedIdx, info };
+  return { rows: filled, interpolatedIdx, info, filledByField };
 }
