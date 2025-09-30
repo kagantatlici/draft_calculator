@@ -520,7 +520,7 @@ export function mountImportWizardEmbedded(container) {
   (function bind() {
     const file = container.querySelector('#pdfwiz-file');
     const status = container.querySelector('#pdfwiz-status');
-    let pdfDoc = null, pageNo = 1, kind = 'scan', tables = [], imgBlob = null, selectedPages = [], activeTable = 0;
+    let pdfDoc = null, pageNo = 1, kind = 'scan', tables = [], imgBlob = null, selectedPages = [], activeTable = 0, rois = {};
     file?.addEventListener('change', async (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       status.textContent = `Yükleniyor: ${f.name}`;
