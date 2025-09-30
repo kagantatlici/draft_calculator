@@ -752,13 +752,30 @@ function bindWizardOnce() {
   const openPdfBtn = document.getElementById('open-pdf-import');
   const pdfEmbed = document.getElementById('pdf-embed');
   if (openPdfBtn && pdfEmbed) {
-    openPdfBtn.addEventListener('click', () => {
+    async function ensurePdfImportModule() {
+      if (window.PDFImportUI && typeof window.PDFImportUI.mountEmbedded === 'function') return true;
+      // Try dynamic ESM import
+      try { await import('./scripts/import/pdf-ui.js?v=lp3'); } catch(_) {}
+      if (window.PDFImportUI && typeof window.PDFImportUI.mountEmbedded === 'function') return true;
+      // Fallback: inject module script tag (in case initial tag failed to execute)
+      try {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.type = 'module';
+          s.src = './scripts/import/pdf-ui.js?v=lp3';
+          s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
+        });
+      } catch(_) {}
+      return !!(window.PDFImportUI && typeof window.PDFImportUI.mountEmbedded === 'function');
+    }
+    openPdfBtn.addEventListener('click', async () => {
       try {
         pdfEmbed.style.display = 'block';
-        if (window.PDFImportUI && typeof window.PDFImportUI.mountEmbedded === 'function') {
+        const ok = await ensurePdfImportModule();
+        if (ok) {
           window.PDFImportUI.mountEmbedded(pdfEmbed);
         } else {
-          pdfEmbed.innerHTML = '<div style="color:#94a3b8;">PDF içe aktarma modülü yüklenemedi.</div>';
+          pdfEmbed.innerHTML = '<div style="color:#94a3b8;">PDF içe aktarma modülü yüklenemedi. Lütfen sayfayı yenileyin veya bir yerel sunucu üzerinden açın.</div>';
         }
       } catch (e) {
         console.error(e);
