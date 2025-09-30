@@ -77,6 +77,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     // Next buttons (ROI adımı kaldırıldı)
     overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(2));
     overlay.querySelector('#go-extract')?.addEventListener('click', runExtraction);
+    overlay.querySelector('#pdfwiz-refine')?.addEventListener('click', refinePass);
     overlay.querySelector('#go-apply')?.addEventListener('click', applyToApp);
     overlay.querySelector('#go-download')?.addEventListener('click', downloadJson);
   }
@@ -228,6 +229,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     const method = overlay.querySelector('input[name="method"]:checked')?.value || 'client';
     const status = overlay.querySelector('#pdfwiz-status');
     status.textContent = 'Çıkarım çalışıyor...';
+    state.lastMethod = method;
     const isImageUpload = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''));
     const curRoi = state.rois[state.pageNo] || null;
     const image = isImageUpload ? state.file : await cropPageToImage(state.pdf, state.pageNo, curRoi);
@@ -303,6 +305,39 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     renderTablePreview();
     gotoStep(3);
     status.textContent = 'Bitti.';
+  }
+
+  // Try an alternate engine to improve missing reads
+  async function refinePass(){
+    const status = overlay.querySelector('#pdfwiz-status');
+    try{
+      status.textContent = 'Eksikleri iyileştirme (2. geçiş)...';
+      const useClient = (state.lastMethod === 'llamaparse');
+      if (useClient) {
+        // Run client OCR on current page (with ROI if any)
+        const isImageUpload = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''));
+        const curRoi = state.rois[state.pageNo] || null;
+        const image = isImageUpload ? state.file : await cropPageToImage(state.pdf, state.pageNo, curRoi);
+        const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 4 }); // alternate psm
+        const table = tableFromOcr(ocr.words, null, { useOpenCV: true });
+        state.tables = [table];
+        state.activeTable = 0;
+      } else {
+        // Use LlamaParse as alternate
+        let toSend = state.file;
+        if (!toSend && state.pdf) {
+          const blob = await cropPageToImage(state.pdf, state.pageNo, state.rois[state.pageNo]||null);
+          toSend = blob;
+        }
+        const lp = await parseWithLlamaParse(toSend);
+        const tables = Array.isArray(lp.tables) && lp.tables.length ? lp.tables : [lp.cells || []];
+        state.tables = tables.map(cells => ({ cells, csv: lp.markdown||lp.md||'' }));
+        state.activeTable = 0;
+      }
+      renderTablePreview();
+      gotoStep(3);
+      status.textContent = 'Bitti.';
+    }catch(e){ status.textContent = 'İyileştirme hatası: ' + (e.message||e); }
   }
 
   function renderTablePreview() {
@@ -483,7 +518,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
             <div id="pdfwiz-validate" style="margin-top:8px;"></div>
           </div>
         </div>
-        <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button></div>
+        <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button><button id="pdfwiz-refine" class="secondary">Eksikleri İyileştir (2. geçiş)</button></div>
       </div>
       <div id="pdfwiz-status" class="muted"></div>
     </div>
@@ -695,13 +730,27 @@ export function mountImportWizardEmbedded(container) {
     function applyMap(headers, applyAll=true){
       const fields = ['draft_m','lcf_m','tpc_t_per_cm','mct1cm_t_m_per_cm']; const col={};
       for(const f of fields){ const v=container.querySelector(`#map-${f}`)?.value; col[f]=v===''?null:Number(v); }
-      const rows=[];
+      const raw=[]; const labels=[]; const missing=new Set();
       const list = applyAll ? tables : [tables[activeTable]];
-      for (const t of list){ const grid = (t&&t.cells)||[]; for(let r=1;r<grid.length;r++){ const row=grid[r]; const draft=toNum(row[col.draft_m]); if(!isFinite(draft)) continue; rows.push({ draft_m:draft, lcf_m:toNum(row[col.lcf_m]), tpc_t_per_cm:toNum(row[col.tpc_t_per_cm]), mct1cm_t_m_per_cm:toNum(row[col.mct1cm_t_m_per_cm]) }); } }
-      const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100; const rowsCompat = rows.map(r=>({draft_m:r.draft_m,lcf_m:r.lcf_m,tpc:r.tpc_t_per_cm,mct:r.mct1cm_t_m_per_cm}));
-      const v = validateHydro(rowsCompat, {LBP: appLBP}); container.querySelector('#pdfwiz-validate').innerHTML = renderValidation(v);
-      container.dataset.rows = JSON.stringify(rows);
+      list.forEach((t,ti)=>{ const grid=(t&&t.cells)||[]; for(let r=1;r<grid.length;r++){ const row=grid[r]; const draft=toNum(row[col.draft_m]); if(!isFinite(draft)) continue; const rec={draft_m:draft,lcf_m:toNum(row[col.lcf_m]),tpc:toNum(row[col.tpc_t_per_cm]),mct:toNum(row[col.mct1cm_t_m_per_cm])}; raw.push(rec); labels.push(`Tablo ${ti+1} • Satır ${r+1}`); if(!(rec.tpc>0) || !(rec.mct>0)) missing.add(raw.length-1); }});
+      const { rows: filled, interpolatedIdx, info } = interpolateRows(raw);
+      const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100; const v = validateHydro(filled, {LBP: appLBP, skipMonotonicIfMissing: new Set([...missing, ...interpolatedIdx]), originLabels: labels});
+      container.querySelector('#pdfwiz-validate').innerHTML = (info? `<div class="ok">${info}</div>`:'') + renderValidation(v);
+      container.dataset.rows = JSON.stringify(filled);
     }
+    // Refine second pass (alternate engine)
+    container.querySelector('#pdfwiz-refine')?.addEventListener('click', async ()=>{
+      status.textContent = 'Eksikleri iyileştirme (2. geçiş)...';
+      try{
+        const roi = imgBlob ? null : (rois[pageNo]||null);
+        if (pdfDoc) {
+          const image = imgBlob ? imgBlob : await cropPageToImage(pdfDoc, pageNo, roi);
+          const ocr = await ocrClient(image,{lang:'eng+tur',psm:4});
+          const t = tableFromOcr(ocr.words, null, {useOpenCV:true}); tables = [t]; activeTable=0; renderPreviewEmbedded();
+        }
+        status.textContent = 'Bitti.';
+      }catch(e){ status.textContent = 'İyileştirme hatası: '+(e.message||e); }
+    });
     container.querySelector('#go-apply')?.addEventListener('click', ()=>{
       const rows = JSON.parse(container.dataset.rows||'[]'); if(!rows.length){ alert('Aktarılacak satır yok.'); return; }
       const compat = rows.map(r=>({draft_m:r.draft_m,lcf_m:r.lcf_m,tpc:r.tpc_t_per_cm,mct:r.mct1cm_t_m_per_cm}));
