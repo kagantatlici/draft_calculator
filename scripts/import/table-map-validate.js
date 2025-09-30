@@ -64,7 +64,7 @@ export function mapHeaders(headers) {
  * @param {{LBP:number}} opts
  * @returns {{errors:string[], warnings:string[]}}
  */
-export function validateHydro(rows, { LBP }) {
+export function validateHydro(rows, { LBP, skipMonotonicIfMissing = new Set(), originLabels = [] } = {}) {
   const errors = [], warnings = [];
   if (!Array.isArray(rows) || !rows.length) return { errors: ['Boş tablo'], warnings };
   const drafts = rows.map(r => r.draft_m);
@@ -73,15 +73,23 @@ export function validateHydro(rows, { LBP }) {
   }
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    if (!(r.tpc > 0)) errors.push(`Satır ${i+1}: TPC > 0 olmalı`);
-    if (!(r.mct > 0)) errors.push(`Satır ${i+1}: MCT1cm > 0 olmalı`);
+    const label = originLabels[i] || `Satır ${i+1}`;
+    if (!(r.tpc > 0)) errors.push(`${label}: TPC > 0 olmalı`);
+    if (!(r.mct > 0)) errors.push(`${label}: MCT1cm > 0 olmalı`);
     if (isFinite(r.lcf_m)) {
       const min = -LBP/2, max = LBP/2;
-      if (r.lcf_m < min || r.lcf_m > max) warnings.push(`Satır ${i+1}: LCF aralığı dışında (${r.lcf_m})`);
+      if (r.lcf_m < min || r.lcf_m > max) warnings.push(`${label}: LCF aralığı dışında (${r.lcf_m})`);
     }
     if (i>0) {
-      if (rows[i].tpc < rows[i-1].tpc) warnings.push(`Satır ${i+1}: TPC azalan`);
-      if (rows[i].mct < rows[i-1].mct) warnings.push(`Satır ${i+1}: MCT1cm azalan`);
+      const skip = skipMonotonicIfMissing instanceof Set ? skipMonotonicIfMissing.has(i) || skipMonotonicIfMissing.has(i-1) : false;
+      if (!skip) {
+        if (isFinite(rows[i].tpc) && isFinite(rows[i-1].tpc) && rows[i].tpc > 0 && rows[i-1].tpc > 0) {
+          if (rows[i].tpc < rows[i-1].tpc) warnings.push(`${label}: TPC azalan`);
+        }
+        if (isFinite(rows[i].mct) && isFinite(rows[i-1].mct) && rows[i].mct > 0 && rows[i-1].mct > 0) {
+          if (rows[i].mct < rows[i-1].mct) warnings.push(`${label}: MCT1cm azalan`);
+        }
+      }
     }
   }
   return { errors, warnings };
@@ -107,3 +115,39 @@ export function toHydrostaticsJson(rows) {
   return { rows: out };
 }
 
+/**
+ * Linearly interpolate missing numeric fields (tpc, mct, lcf_m) based on draft order.
+ * Returns { rows: filledRows, interpolatedIdx: Set<number>, info: string }
+ */
+export function interpolateRows(rows) {
+  const fields = ['tpc', 'mct', 'lcf_m'];
+  const filled = rows.slice().map(r => ({ ...r }));
+  const interpolatedIdx = new Set();
+  const byDraft = filled.slice().sort((a,b)=> a.draft_m - b.draft_m);
+  for (const f of fields) {
+    // gather indices where missing or non-positive for tpc/mct; for lcf allow zero but NaN interpolated
+    const isMissing = (v)=> !(isFinite(v) && (f==='lcf_m' ? true : v>0));
+    // forward pass to find spans
+    let i=0;
+    while (i<byDraft.length) {
+      while (i<byDraft.length && !isMissing(byDraft[i][f])) i++;
+      if (i>=byDraft.length) break;
+      const start = i-1;
+      let j=i; while (j<byDraft.length && isMissing(byDraft[j][f])) j++;
+      const end = j; // first valid after missing span
+      const a = start>=0 ? byDraft[start] : null;
+      const b = end<byDraft.length ? byDraft[end] : null;
+      if (a && b) {
+        for (let k=i;k<end;k++){
+          const t = (byDraft[k].draft_m - a.draft_m)/(b.draft_m - a.draft_m || 1);
+          byDraft[k][f] = a[f] + (b[f]-a[f]) * t;
+          interpolatedIdx.add(filled.indexOf(byDraft[k]));
+        }
+      }
+      i = end+1;
+    }
+  }
+  // map back order preserved
+  const info = interpolatedIdx.size>0 ? `Interpolasyon: ${interpolatedIdx.size} satır dolduruldu` : '';
+  return { rows: filled, interpolatedIdx, info };
+}

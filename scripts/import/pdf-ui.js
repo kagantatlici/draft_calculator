@@ -7,7 +7,7 @@
 import { loadPdf, renderThumbnails, getPageTextItems, detectPdfKind, cropPageToImage } from './pdf-core.js';
 import { ocrClient, tableFromOcr } from './pdf-client-ocr.js';
 import { clusterToTable } from './pdf-structure.js';
-import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson } from './table-map-validate.js';
+import { mapHeaders, normalizeCellText, validateHydro, toHydrostaticsJson, interpolateRows } from './table-map-validate.js';
 import { hfHealthy, getHFBase } from './hfspace-service.js?v=lp3';
 import { normalizeHydroCells } from './table-normalize.js?v=lp3';
 import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
@@ -361,29 +361,40 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       const v = overlay.querySelector(`#map-${f}`)?.value;
       col[f] = v===''? null : Number(v);
     }
-    // Build rows skipping header; aggregate across tables if requested
-    const rows = [];
+    // Build rows skipping header; aggregate across tables if requested,
+    // keep origin labels for per-table row numbers (header dahil 1'den başlar)
+    const rawRows = [];
+    const originLabels = [];
+    const missingIdx = new Set();
     const tables = applyToAll ? (state.tables||[]) : [state.tables[state.activeTable]];
-    for (const t of tables) {
+    tables.forEach((t, ti) => {
       const grid = (t && t.cells) ? t.cells : [];
       for (let r = 1; r < grid.length; r++) {
         const row = grid[r];
         const draft = toNum(row[col.draft_m]);
         if (!isFinite(draft)) continue;
-        rows.push({
+        const rec = {
           draft_m: draft,
           lcf_m: toNum(row[col.lcf_m]),
-          tpc_t_per_cm: toNum(row[col.tpc_t_per_cm]),
-          mct1cm_t_m_per_cm: toNum(row[col.mct1cm_t_m_per_cm]),
-        });
+          tpc: toNum(row[col.tpc_t_per_cm]),
+          mct: toNum(row[col.mct1cm_t_m_per_cm]),
+        };
+        rawRows.push(rec);
+        originLabels.push(`Tablo ${ti+1} • Satır ${r+1}`);
+        if (!(rec.tpc > 0) || !(rec.mct > 0)) missingIdx.add(rawRows.length-1);
       }
-    }
+    });
+    // Interpolate missing values where possible
+    const { rows: filled, interpolatedIdx, info } = interpolateRows(rawRows);
+    // Validate with skip of monotonic checks when neighbors are missing/interpolated
     const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100;
-    const rowsCompat = rows.map(r=> ({ draft_m: r.draft_m, lcf_m: r.lcf_m, tpc: r.tpc_t_per_cm, mct: r.mct1cm_t_m_per_cm }));
-    const v = validateHydro(rowsCompat, { LBP: appLBP });
+    const v = validateHydro(filled, { LBP: appLBP, skipMonotonicIfMissing: new Set([...missingIdx, ...interpolatedIdx]), originLabels });
+    // Render validation with extra info
     const rep = overlay.querySelector('#pdfwiz-validate');
-    rep.innerHTML = renderValidation(v);
-    overlay.dataset.rows = JSON.stringify(rows);
+    rep.innerHTML = (info? `<div class="ok">${info}</div>` : '') + renderValidation(v);
+    // Persist rows for apply
+    overlay.dataset.rows = JSON.stringify(filled);
+    overlay.dataset.interp = JSON.stringify([...interpolatedIdx]);
   }
 
   function applyToApp() {
