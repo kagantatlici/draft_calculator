@@ -3,24 +3,45 @@
  */
 import { getHFBase } from './hfspace-service.js';
 
-function parseMarkdownTable(md){
+function parseMarkdownTables(md){
+  // Extract all GitHub-style markdown tables from markdown
   if (!md) return [];
   const lines = String(md).split(/\r?\n/);
-  const tableLines = [];
+  const tables = [];
+  let cur = [];
   let inBlock = false;
-  for (const l of lines){
-    const s = l.trim();
-    if (/^\|.*\|$/.test(s)) { tableLines.push(s); inBlock = true; }
-    else if (inBlock && s==='') break;
+  for (const raw of lines){
+    const s = raw.trim();
+    if (/^\|.*\|$/.test(s)) {
+      // markdown table row
+      cur.push(s);
+      inBlock = true;
+      continue;
+    }
+    // separator line in table: keep inside cur but skip when materializing rows
+    if (inBlock && s === '') {
+      if (cur.length) tables.push(cur.splice(0, cur.length));
+      inBlock = false;
+      continue;
+    }
+    // non-table line while in a block ends the table
+    if (inBlock) {
+      if (cur.length) tables.push(cur.splice(0, cur.length));
+      inBlock = false;
+    }
   }
-  if (!tableLines.length) return [];
-  const rows = [];
-  for (const l of tableLines){
-    if (/^\|\s*-/.test(l)) continue; // separator
-    const cells = l.split('|').slice(1,-1).map(x=> x.trim());
-    if (cells.length) rows.push(cells);
-  }
-  return rows;
+  if (cur.length) tables.push(cur);
+
+  const toCells = (tableLines)=>{
+    const rows = [];
+    for (const l of tableLines){
+      if (/^\|\s*-/.test(l)) continue; // separator line
+      const cells = l.split('|').slice(1,-1).map(x=> x.trim());
+      if (cells.length) rows.push(cells);
+    }
+    return rows;
+  };
+  return tables.map(toCells).filter(t => t && t.length);
 }
 
 export async function parseWithLlamaParse(file){
@@ -33,9 +54,13 @@ export async function parseWithLlamaParse(file){
     throw new Error('LlamaParse API hatası: ' + (msg || (res.status + ' ' + res.statusText)));
   }
   const js = await res.json();
+  // Prefer structured cells if provided; also parse all markdown tables for multi-page PDFs
   if (!js.cells || !js.cells.length){
-    js.cells = parseMarkdownTable(js.markdown || js.md || '');
+    const tables = parseMarkdownTables(js.markdown || js.md || '');
+    js.tables = tables;
+    js.cells = (tables && tables.length) ? tables[0] : [];
+  } else {
+    js.tables = [js.cells];
   }
   return js;
 }
-

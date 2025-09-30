@@ -24,7 +24,9 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       pageNo: 1,
       kind: 'scan',
       roi: null, // {x,y,w,h} in normalized [0..1]
-      table: null, // {cells,csv,bboxes,confidence}
+      table: null, // legacy single table {cells,csv,bboxes,confidence}
+      tables: [], // multi-table support: Array<{cells,csv?,bboxes?,confidence?}>
+      activeTable: 0, // index into tables
       selectedPages: [], // multi-select support for LlamaParse (1-based)
     };
   const overlay = document.getElementById('pdf-import-overlay');
@@ -164,9 +166,17 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
               toSend = new Blob([outBytes], { type: 'application/pdf' });
             } catch(_) { /* fallback to original file/image */ }
           }
-          table = await parseWithLlamaParse(toSend);
-          const norm = normalizeHydroCells(table.cells);
-          if (norm && norm.length) table.cells = norm;
+          const lp = await parseWithLlamaParse(toSend);
+          // Normalize each detected table if possible (wide->tall)
+          const tables = Array.isArray(lp.tables) && lp.tables.length ? lp.tables : [lp.cells || []];
+          const normTables = tables.map(cells => {
+            const norm = normalizeHydroCells(cells);
+            return { cells: (norm && norm.length) ? norm : cells, csv: lp.markdown || lp.md || '' };
+          });
+          state.tables = normTables;
+          state.table = normTables[0] || { cells: [], csv: '' };
+          state.activeTable = 0;
+          table = null; // handled via state.tables
         } catch (err) { status.textContent = 'LlamaParse hatası: ' + (err.message || err); return; }
       }
     } catch (err) {
@@ -174,60 +184,90 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       status.textContent = `Hata: ${err.message || err}`;
       return;
     }
-    state.table = table || { cells: [], csv: '', bboxes: [], confidence: 0 };
+    if (method === 'client') {
+      state.table = table || { cells: [], csv: '', bboxes: [], confidence: 0 };
+      state.tables = [state.table];
+      state.activeTable = 0;
+    }
     renderTablePreview();
     gotoStep(3);
     status.textContent = 'Bitti.';
   }
 
   function renderTablePreview() {
-    const wrap = overlay.querySelector('#pdfwiz-preview');
-    wrap.innerHTML = '';
-    if (!state.table || !state.table.cells || !state.table.cells.length) {
-      wrap.innerHTML = '<div class="info">Tablo tespit edilemedi. Farklı yöntem deneyin.</div>';
+    const tables = Array.isArray(state.tables) ? state.tables : (state.table ? [state.table] : []);
+    const scroller = overlay.querySelector('#pdfwiz-preview-scroller');
+    const tabs = overlay.querySelector('#pdfwiz-tabs');
+    if (tabs) tabs.innerHTML = '';
+    if (scroller) scroller.innerHTML = '';
+    if (!tables.length || !tables[0].cells || !tables[0].cells.length) {
+      if (scroller) scroller.innerHTML = '<div class="info" style="padding:8px;">Tablo tespit edilemedi. Farklı yöntem deneyin.</div>';
       return;
     }
+    // Tabs for multiple tables/pages
+    if (tabs) {
+      const frag = document.createDocumentFragment();
+      tables.forEach((t, i) => {
+        const b = document.createElement('button');
+        b.className = 'tab small' + (i===state.activeTable ? ' active' : '');
+        b.textContent = `Tablo ${i+1}`;
+        b.addEventListener('click', ()=>{ state.activeTable = i; renderTablePreview(); });
+        frag.appendChild(b);
+      });
+      tabs.appendChild(frag);
+    }
+    const cur = tables[state.activeTable] || tables[0];
+    const cells = cur.cells;
+    const meta = overlay.querySelector('#pdfwiz-preview-meta');
+    if (meta) meta.textContent = `Satır: ${cells.length} • Sütun: ${Math.max(...cells.map(r=>r.length))}`;
+    const scroller = overlay.querySelector('#pdfwiz-preview-scroller');
+    scroller.innerHTML = '';
     const tbl = document.createElement('table');
-    // Avoid using class "grid" here (CSS grid) to prevent text overlap in preview tables
-    const cells = state.table.cells;
-    for (let r = 0; r < Math.min(40, cells.length); r++) {
+    tbl.className = 'pdf-table';
+    for (let r = 0; r < Math.min(80, cells.length); r++) {
       const tr = document.createElement('tr');
       const row = cells[r];
-      for (let c = 0; c < Math.min(12, row.length); c++) {
+      for (let c = 0; c < Math.min(16, row.length); c++) {
         const td = document.createElement(r===0? 'th':'td');
         td.textContent = row[c];
         tr.appendChild(td);
       }
       tbl.appendChild(tr);
     }
-    wrap.appendChild(tbl);
-    // Header mapping UI from first row
+    scroller.appendChild(tbl);
+    // Header mapping UI from current table's first row
     const headers = cells[0] || [];
     const m = mapHeaders(headers);
     const mapBox = overlay.querySelector('#pdfwiz-map');
     mapBox.innerHTML = renderMapUI(headers, m);
-    mapBox.querySelector('#apply-map')?.addEventListener('click', ()=> applyMapping(headers));
+    const mapAll = overlay.querySelector('#map-apply-all');
+    const applyBtn = overlay.querySelector('#apply-map');
+    applyBtn?.addEventListener('click', ()=> applyMapping(headers, mapAll?.checked));
   }
 
-  function applyMapping(headers) {
+  function applyMapping(headers, applyToAll = true) {
     const fields = ['draft_m','lcf_m','tpc_t_per_cm','mct1cm_t_m_per_cm'];
     const col = {};
     for (const f of fields) {
       const v = overlay.querySelector(`#map-${f}`)?.value;
       col[f] = v===''? null : Number(v);
     }
-    // Build rows skipping header
+    // Build rows skipping header; aggregate across tables if requested
     const rows = [];
-    for (let r = 1; r < state.table.cells.length; r++) {
-      const row = state.table.cells[r];
-      const draft = toNum(row[col.draft_m]);
-      if (!isFinite(draft)) continue;
-      rows.push({
-        draft_m: draft,
-        lcf_m: toNum(row[col.lcf_m]),
-        tpc_t_per_cm: toNum(row[col.tpc_t_per_cm]),
-        mct1cm_t_m_per_cm: toNum(row[col.mct1cm_t_m_per_cm]),
-      });
+    const tables = applyToAll ? (state.tables||[]) : [state.tables[state.activeTable]];
+    for (const t of tables) {
+      const grid = (t && t.cells) ? t.cells : [];
+      for (let r = 1; r < grid.length; r++) {
+        const row = grid[r];
+        const draft = toNum(row[col.draft_m]);
+        if (!isFinite(draft)) continue;
+        rows.push({
+          draft_m: draft,
+          lcf_m: toNum(row[col.lcf_m]),
+          tpc_t_per_cm: toNum(row[col.tpc_t_per_cm]),
+          mct1cm_t_m_per_cm: toNum(row[col.mct1cm_t_m_per_cm]),
+        });
+      }
     }
     const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100;
     const rowsCompat = rows.map(r=> ({ draft_m: r.draft_m, lcf_m: r.lcf_m, tpc: r.tpc_t_per_cm, mct: r.mct1cm_t_m_per_cm }));
@@ -301,9 +341,22 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       </div>
       <div class="pdfwiz-step" data-step="3" style="display:none;">
         <h3>3) Önizleme + Eşleme + Doğrulama</h3>
-        <div id="pdfwiz-preview"></div>
-        <div id="pdfwiz-map"></div>
-        <div id="pdfwiz-validate"></div>
+        <div id="pdfwiz-tabs" class="tabs-row"></div>
+        <div class="step3-layout">
+          <div class="preview-pane">
+            <div class="preview-head"><span id="pdfwiz-preview-meta" class="muted"></span></div>
+            <div id="pdfwiz-preview-scroller" class="preview-scroller"></div>
+          </div>
+          <div class="side-pane">
+            <div id="pdfwiz-map"></div>
+            <div class="muted" style="margin:6px 0; display:flex; align-items:center; gap:8px;">
+              <label style="display:flex; align-items:center; gap:6px;">
+                <input id="map-apply-all" type="checkbox" checked /> Tüm tablolara uygula
+              </label>
+            </div>
+            <div id="pdfwiz-validate" style="margin-top:8px;"></div>
+          </div>
+        </div>
         <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button></div>
       </div>
       <div id="pdfwiz-status" class="muted"></div>
@@ -352,13 +405,13 @@ export function mountImportWizardEmbedded(container) {
   (function bind() {
     const file = container.querySelector('#pdfwiz-file');
     const status = container.querySelector('#pdfwiz-status');
-    let pdfDoc = null, pageNo = 1, kind = 'scan', table = null, imgBlob = null, selectedPages = [];
+    let pdfDoc = null, pageNo = 1, kind = 'scan', tables = [], imgBlob = null, selectedPages = [], activeTable = 0;
     file?.addEventListener('change', async (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       status.textContent = `Yükleniyor: ${f.name}`;
       const isImage = /^image\//i.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name||'');
       if (isImage) {
-        imgBlob = f; pdfDoc = null; pageNo = 1; kind = 'scan';
+        imgBlob = f; pdfDoc = null; pageNo = 1; kind = 'scan'; tables = []; activeTable = 0;
         const grid = container.querySelector('#pdfwiz-thumbs'); if (grid) grid.innerHTML='';
         container.querySelector('#pdfwiz-kind').textContent = 'Görüntü (PNG/JPG)';
       } else {
@@ -398,16 +451,20 @@ export function mountImportWizardEmbedded(container) {
         if (method==='client') {
           if (pdfDoc && kind === 'vector') {
             const items = await getPageTextItems(pdfDoc, pageNo);
-            table = clusterToTable(items);
+            tables = [clusterToTable(items)]; activeTable = 0;
           } else {
-            table = tableFromClient(image);
+            const t = await tableFromClient(image); tables = [t]; activeTable = 0;
           }
         } else if (method==='llamaparse') {
           try {
             let toSend = imgBlob || (await cropPageToImage(pdfDoc, pageNo, null));
-            // If we have pdfDoc but not original file, we cannot reconstruct exact bytes; fall back to image unless single page is enough
             const out = await parseWithLlamaParse(toSend);
-            table = { cells: out.cells||[], csv: (out.markdown||''), bboxes: [], confidence: null };
+            const arr = Array.isArray(out.tables) && out.tables.length ? out.tables : [out.cells||[]];
+            tables = arr.map(cells => {
+              const norm = normalizeHydroCells(cells);
+              return { cells: (norm && norm.length) ? norm : cells, csv: out.markdown || out.md || '' };
+            });
+            activeTable = 0;
           } catch(e) { status.textContent='LlamaParse hatası: ' + (e.message||e); return; }
         }
       } catch (e) { status.textContent = 'Hata: ' + (e.message||e); return; }
@@ -415,16 +472,38 @@ export function mountImportWizardEmbedded(container) {
     });
     function tableFromClient(image){ return ocrClient(image,{lang:'eng+tur',psm:6}).then(ocr=> tableFromOcr(ocr.words, null, {useOpenCV:true})); }
     function renderPreviewEmbedded(){
-      const wrap = container.querySelector('#pdfwiz-preview'); wrap.innerHTML='';
-      if (!table || !table.cells || !table.cells.length) { wrap.innerHTML='<div class="info">Tablo bulunamadı.</div>'; return; }
-      const tbl = document.createElement('table');
-      for (let r=0; r<Math.min(40, table.cells.length); r++){ const tr=document.createElement('tr'); const row=table.cells[r]; for(let c=0;c<Math.min(12,row.length);c++){ const td=document.createElement(r===0?'th':'td'); td.textContent=row[c]; tr.appendChild(td);} tbl.appendChild(tr);} wrap.appendChild(tbl);
-      const headers = table.cells[0]||[]; const m=mapHeaders(headers); const mapBox = container.querySelector('#pdfwiz-map'); mapBox.innerHTML = renderMapUI(headers, m); mapBox.querySelector('#apply-map')?.addEventListener('click', ()=> applyMap(headers));
+      const tabs = container.querySelector('#pdfwiz-tabs'); if (tabs) { tabs.innerHTML=''; }
+      const sc = container.querySelector('#pdfwiz-preview-scroller'); if (sc) sc.innerHTML='';
+      const cur = (tables && tables.length) ? tables[activeTable] : null;
+      if (!cur || !cur.cells || !cur.cells.length) {
+        if (sc) sc.innerHTML = '<div class="info" style="padding:8px;">Tablo bulunamadı.</div>';
+        return;
+      }
+      if (tabs && tables.length>1){
+        const frag = document.createDocumentFragment();
+        tables.forEach((_,i)=>{
+          const b = document.createElement('button'); b.className='tab small'+(i===activeTable?' active':''); b.textContent = `Tablo ${i+1}`; b.addEventListener('click', ()=>{ activeTable=i; renderPreviewEmbedded(); }); frag.appendChild(b);
+        });
+        tabs.appendChild(frag);
+      }
+      const meta = container.querySelector('#pdfwiz-preview-meta');
+      if (meta) meta.textContent = `Satır: ${cur.cells.length} • Sütun: ${Math.max(...cur.cells.map(r=>r.length))}`;
+      const tbl = document.createElement('table'); tbl.className='pdf-table';
+      for (let r=0; r<Math.min(80, cur.cells.length); r++){
+        const tr=document.createElement('tr'); const row=cur.cells[r];
+        for(let c=0;c<Math.min(16,row.length);c++){ const td=document.createElement(r===0?'th':'td'); td.textContent=row[c]; tr.appendChild(td);} tbl.appendChild(tr);
+      }
+      if (sc) sc.appendChild(tbl);
+      const headers = cur.cells[0]||[]; const m=mapHeaders(headers); const mapBox = container.querySelector('#pdfwiz-map'); mapBox.innerHTML = renderMapUI(headers, m);
+      const applyBtn = container.querySelector('#apply-map'); const applyAll = container.querySelector('#map-apply-all');
+      applyBtn?.addEventListener('click', ()=> applyMap(headers, !!applyAll?.checked));
     }
-    function applyMap(headers){
+    function applyMap(headers, applyAll=true){
       const fields = ['draft_m','lcf_m','tpc_t_per_cm','mct1cm_t_m_per_cm']; const col={};
       for(const f of fields){ const v=container.querySelector(`#map-${f}`)?.value; col[f]=v===''?null:Number(v); }
-      const rows=[]; for(let r=1;r<table.cells.length;r++){ const row=table.cells[r]; const draft=toNum(row[col.draft_m]); if(!isFinite(draft)) continue; rows.push({ draft_m:draft, lcf_m:toNum(row[col.lcf_m]), tpc_t_per_cm:toNum(row[col.tpc_t_per_cm]), mct1cm_t_m_per_cm:toNum(row[col.mct1cm_t_m_per_cm]) }); }
+      const rows=[];
+      const list = applyAll ? tables : [tables[activeTable]];
+      for (const t of list){ const grid = (t&&t.cells)||[]; for(let r=1;r<grid.length;r++){ const row=grid[r]; const draft=toNum(row[col.draft_m]); if(!isFinite(draft)) continue; rows.push({ draft_m:draft, lcf_m:toNum(row[col.lcf_m]), tpc_t_per_cm:toNum(row[col.tpc_t_per_cm]), mct1cm_t_m_per_cm:toNum(row[col.mct1cm_t_m_per_cm]) }); } }
       const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100; const rowsCompat = rows.map(r=>({draft_m:r.draft_m,lcf_m:r.lcf_m,tpc:r.tpc_t_per_cm,mct:r.mct1cm_t_m_per_cm}));
       const v = validateHydro(rowsCompat, {LBP: appLBP}); container.querySelector('#pdfwiz-validate').innerHTML = renderValidation(v);
       container.dataset.rows = JSON.stringify(rows);

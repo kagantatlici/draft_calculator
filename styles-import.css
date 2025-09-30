@@ -18,3 +18,17 @@ canvas.thumb { outline: none; cursor: pointer; border:1px solid #334155; border-
 .map-box { border:1px solid #1e293b; padding:8px; border-radius:6px; }
 .map-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }
 .map-field { display:flex; flex-direction:column; gap:4px; }
+
+/* Step 3 improved layout */
+.step3-layout { display:grid; grid-template-columns: 2fr 1fr; gap:12px; align-items:start; }
+@media (max-width: 900px) { .step3-layout { grid-template-columns: 1fr; } }
+.preview-pane { display:flex; flex-direction:column; gap:8px; }
+.preview-head { display:flex; align-items:center; justify-content:space-between; }
+.preview-scroller { max-height: 50vh; overflow:auto; border:1px solid #1e293b; border-radius:6px; background:#0b1220; }
+.pdf-table { border-collapse: collapse; width: max-content; min-width: 100%; table-layout: auto; }
+.pdf-table th, .pdf-table td { border:1px solid #273445; padding:4px 6px; font-size:12px; white-space: nowrap; }
+.side-pane { display:grid; gap:8px; align-items:start; }
+.tabs-row { display:flex; gap:6px; flex-wrap:wrap; }
+.tab { background:#1f2937; color:#e2e8f0; border:1px solid #334155; border-radius:999px; padding:6px 10px; cursor:pointer; }
+.tab.small { font-size:12px; padding:4px 10px; }
+.tab.active { background:#38bdf8; color:#06223e; border-color:#38bdf8; }
