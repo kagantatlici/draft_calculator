@@ -127,7 +127,8 @@ export function interpolateRows(rows) {
   const filledByField = {};
   const byDraft = filled.slice().sort((a,b)=> a.draft_m - b.draft_m);
   for (const f of fields) {
-    const isMissing = (v)=> !(isFinite(v) && (f==='lcf_m' ? true : v>0));
+    // Treat 0 as missing for lcf_m too, since OCR often returns 0 instead of blank; real 0 is rare and will be interpolated smoothly
+    const isMissing = (v)=> !(isFinite(v) && (f==='lcf_m' ? v!==0 : v>0));
     let i=0;
     while (i<byDraft.length) {
       while (i<byDraft.length && !isMissing(byDraft[i][f])) i++;

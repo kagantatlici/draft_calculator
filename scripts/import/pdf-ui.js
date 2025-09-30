@@ -339,7 +339,15 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       tabs.appendChild(frag);
     }
     const cur = tables[state.activeTable] || tables[0];
-    const cells = cur.cells;
+    let cells = cur.cells;
+    // If we have patched cells for active table, use them
+    try{
+      const pi = Number(overlay.dataset.patchedActiveIndex||'-1');
+      if (pi === state.activeTable && overlay.dataset.patchedActiveCells){
+        const patched = JSON.parse(overlay.dataset.patchedActiveCells||'null');
+        if (patched && patched.length) cells = patched;
+      }
+    }catch(_){ }
     const meta = overlay.querySelector('#pdfwiz-preview-meta');
     if (meta) meta.textContent = `Satır: ${cells.length} • Sütun: ${Math.max(...cells.map(r=>r.length))}`;
     const tbl = document.createElement('table');
@@ -347,6 +355,12 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     // Interpolated highlight set
     let interpSet = null;
     try { const lbls = JSON.parse(overlay.dataset.interpLabels||'[]'); interpSet = new Set(lbls||[]); } catch(_) { interpSet = null; }
+    // For per-cell highlights we need column mapping
+    const headers = cells[0] || [];
+    const cm = mapHeaders(headers);
+    const idxMap = { draft_m: cm.draft_m, lcf_m: cm.lcf_m, tpc_t_per_cm: cm.tpc_t_per_cm, mct1cm_t_m_per_cm: cm.mct1cm_t_m_per_cm };
+    let interpCellsMap = null;
+    try { interpCellsMap = JSON.parse(overlay.dataset.interpCells||'{}'); } catch(_) { interpCellsMap = null; }
     for (let r = 0; r < Math.min(80, cells.length); r++) {
       const tr = document.createElement('tr');
       const row = cells[r];
@@ -357,13 +371,19 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       for (let c = 0; c < Math.min(16, row.length); c++) {
         const td = document.createElement(r===0? 'th':'td');
         td.textContent = row[c];
+        if (r>0 && interpCellsMap){
+          const label = `Tablo ${state.activeTable+1} • Satır ${r+1}`;
+          const fields = interpCellsMap[label] || [];
+          if ((fields.includes('lcf_m') && c===idxMap.lcf_m) || (fields.includes('tpc') && c===idxMap.tpc_t_per_cm) || (fields.includes('mct') && c===idxMap.mct1cm_t_m_per_cm)) {
+            td.classList.add('interp-cell');
+          }
+        }
         tr.appendChild(td);
       }
       tbl.appendChild(tr);
     }
     scroller.appendChild(tbl);
-    // Header mapping UI from current table's first row
-    const headers = cells[0] || [];
+    // Header mapping UI from first row of current table
     const m = mapHeaders(headers);
     const mapBox = overlay.querySelector('#pdfwiz-map');
     mapBox.innerHTML = renderMapUI(headers, m);
@@ -416,6 +436,33 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     overlay.dataset.interpLabels = JSON.stringify([...interpolatedIdx].map(i => originLabels[i]));
     overlay.dataset.interpCells = JSON.stringify(Object.fromEntries(Object.entries(filledByField).map(([i,arr])=>[originLabels[Number(i)],arr])));
     renderMappedPreview(filled, originLabels, filledByField);
+    // Build patched view for active table only so user sees filled values directly
+    try {
+      const ti = state.activeTable;
+      const cur = state.tables[ti];
+      if (cur && cur.cells && cur.cells.length) {
+        const headers = cur.cells[0]||[];
+        const m = mapHeaders(headers);
+        const draftCol = Number(m.draft_m);
+        const lcfCol = Number(m.lcf_m);
+        const tpcCol = Number(m.tpc_t_per_cm);
+        const mctCol = Number(m.mct1cm_t_m_per_cm);
+        const patched = cur.cells.map(row => row.slice());
+        const labelToRow = {};
+        for (let i=0;i<originLabels.length;i++){ labelToRow[originLabels[i]] = filled[i]; }
+        for (let r=1; r<patched.length; r++){
+          const label = `Tablo ${ti+1} • Satır ${r+1}`;
+          const fr = labelToRow[label];
+          if (!fr) continue;
+          const fmt=(n)=> (isFinite(n)? String(Number(n).toFixed(3)).replace(/\.000$/,'') : '');
+          if (isFinite(lcfCol)) patched[r][lcfCol] = fmt(fr.lcf_m);
+          if (isFinite(tpcCol)) patched[r][tpcCol] = fmt(fr.tpc);
+          if (isFinite(mctCol)) patched[r][mctCol] = fmt(fr.mct);
+        }
+        overlay.dataset.patchedActiveIndex = String(ti);
+        overlay.dataset.patchedActiveCells = JSON.stringify(patched);
+      }
+    } catch(_) { /* ignore */ }
     renderTablePreview();
   }
 
