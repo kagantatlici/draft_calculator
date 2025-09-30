@@ -548,9 +548,14 @@ export function mountImportWizardEmbedded(container) {
       const ctx = roiCanvas.getContext('2d');
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
       const r = rois[pageNo];
-      if (r) {
-        ctx.save(); ctx.strokeStyle = '#38bdf8'; ctx.setLineDash([6,4]); ctx.lineWidth = 2;
-        ctx.strokeRect(r.x*roiCanvas.width, r.y*roiCanvas.height, r.w*roiCanvas.width, r.h*roiCanvas.height);
+      if (r && r.w>0 && r.h>0) {
+        const x=r.x*roiCanvas.width, y=r.y*roiCanvas.height, w=r.w*roiCanvas.width, h=r.h*roiCanvas.height;
+        ctx.save();
+        ctx.fillStyle='rgba(2,6,23,0.35)';
+        ctx.fillRect(0,0,roiCanvas.width,roiCanvas.height);
+        ctx.clearRect(x,y,w,h);
+        ctx.strokeStyle='#38bdf8'; ctx.setLineDash([8,5]); ctx.lineWidth=3;
+        ctx.strokeRect(x,y,w,h);
         ctx.restore();
       }
       bindRoiEmbedded(roiCanvas);

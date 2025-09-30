@@ -11,6 +11,7 @@ canvas.thumb { outline: none; cursor: pointer; border:1px solid #334155; border-
 .thumb-check { position: absolute; top:6px; left:6px; width:18px; height:18px; z-index: 2; accent-color:#38bdf8; }
 .thumb-checkmark { position:absolute; top:6px; left:30px; font-size:12px; color:#9fb3c8; }
 .roi-canvas { display:block; max-width: 100%; height: auto; border:1px solid #1e293b; background:#0b1220; }
+.roi-canvas { cursor: crosshair; }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .muted { color:#9fb3c8; font-size:12px; }
 .info { color:#93c5fd; font-size:12px; }
