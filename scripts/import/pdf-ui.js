@@ -220,8 +220,6 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     const cells = cur.cells;
     const meta = overlay.querySelector('#pdfwiz-preview-meta');
     if (meta) meta.textContent = `Satır: ${cells.length} • Sütun: ${Math.max(...cells.map(r=>r.length))}`;
-    const scroller = overlay.querySelector('#pdfwiz-preview-scroller');
-    scroller.innerHTML = '';
     const tbl = document.createElement('table');
     tbl.className = 'pdf-table';
     for (let r = 0; r < Math.min(80, cells.length); r++) {
