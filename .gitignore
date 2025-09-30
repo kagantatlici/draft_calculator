@@ -4,6 +4,7 @@ node_modules/
 *.pdf
 *.PNG
 *.png
+!tiny.png
 *.jpg
 *.jpeg
 *.docx
