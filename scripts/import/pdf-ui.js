@@ -344,9 +344,16 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     if (meta) meta.textContent = `Satır: ${cells.length} • Sütun: ${Math.max(...cells.map(r=>r.length))}`;
     const tbl = document.createElement('table');
     tbl.className = 'pdf-table';
+    // Interpolated highlight set
+    let interpSet = null;
+    try { const lbls = JSON.parse(overlay.dataset.interpLabels||'[]'); interpSet = new Set(lbls||[]); } catch(_) { interpSet = null; }
     for (let r = 0; r < Math.min(80, cells.length); r++) {
       const tr = document.createElement('tr');
       const row = cells[r];
+      if (interpSet && r>0) {
+        const label = `Tablo ${state.activeTable+1} • Satır ${r+1}`;
+        if (interpSet.has(label)) tr.classList.add('interp-row');
+      }
       for (let c = 0; c < Math.min(16, row.length); c++) {
         const td = document.createElement(r===0? 'th':'td');
         td.textContent = row[c];
@@ -402,10 +409,13 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     const v = validateHydro(filled, { LBP: appLBP, skipMonotonicIfMissing: new Set([...missingIdx, ...interpolatedIdx]), originLabels });
     // Render validation with extra info
     const rep = overlay.querySelector('#pdfwiz-validate');
-    rep.innerHTML = (info? `<div class="ok">${info}</div>` : '') + renderValidation(v);
+    rep.innerHTML = (info? `<div class="ok">${info} • Enterpolasyonlu satırlar önizlemede vurgulandı.</div>` : '') + renderValidation(v);
     // Persist rows for apply
     overlay.dataset.rows = JSON.stringify(filled);
     overlay.dataset.interp = JSON.stringify([...interpolatedIdx]);
+    overlay.dataset.interpLabels = JSON.stringify([...interpolatedIdx].map(i => originLabels[i]));
+    // Refresh preview to apply row highlights
+    renderTablePreview();
   }
 
   function applyToApp() {
@@ -711,7 +721,10 @@ export function mountImportWizardEmbedded(container) {
       list.forEach((t,ti)=>{ const grid=(t&&t.cells)||[]; for(let r=1;r<grid.length;r++){ const row=grid[r]; const draft=toNum(row[col.draft_m]); if(!isFinite(draft)) continue; const rec={draft_m:draft,lcf_m:toNum(row[col.lcf_m]),tpc:toNum(row[col.tpc_t_per_cm]),mct:toNum(row[col.mct1cm_t_m_per_cm])}; raw.push(rec); labels.push(`Tablo ${ti+1} • Satır ${r+1}`); if(!(rec.tpc>0) || !(rec.mct>0)) missing.add(raw.length-1); }});
       const { rows: filled, interpolatedIdx, info } = interpolateRows(raw);
       const appLBP = (window.SHIP?.LBP) || (window.SHIP_ACTIVE?.LBP) || 100; const v = validateHydro(filled, {LBP: appLBP, skipMonotonicIfMissing: new Set([...missing, ...interpolatedIdx]), originLabels: labels});
-      container.querySelector('#pdfwiz-validate').innerHTML = (info? `<div class="ok">${info}</div>`:'') + renderValidation(v);
+      container.querySelector('#pdfwiz-validate').innerHTML = (info? `<div class="ok">${info} • Enterpolasyonlu satırlar önizlemede vurgulandı.</div>`:'') + renderValidation(v);
+      container.dataset.interp = JSON.stringify([...interpolatedIdx]);
+      container.dataset.interpLabels = JSON.stringify([...interpolatedIdx].map(i=> labels[i]));
+      renderPreviewEmbedded();
       container.dataset.rows = JSON.stringify(filled);
     }
     // Interpolation button: re-run mapping with current headers

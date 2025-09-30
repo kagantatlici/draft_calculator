@@ -34,6 +34,8 @@ canvas.thumb { outline: none; cursor: pointer; border:1px solid #334155; border-
 .preview-scroller { max-height: 50vh; overflow:auto; border:1px solid #1e293b; border-radius:6px; background:#0b1220; }
 .pdf-table { border-collapse: collapse; width: max-content; min-width: 100%; table-layout: auto; }
 .pdf-table th, .pdf-table td { border:1px solid #273445; padding:4px 6px; font-size:12px; white-space: nowrap; }
+.pdf-table tr.interp-row td { background: rgba(56,189,248,0.12); }
+.pdf-table tr.interp-row td:first-child { box-shadow: inset 3px 0 0 #38bdf8; }
 .side-pane { display:grid; gap:8px; align-items:start; }
 .tabs-row { display:flex; gap:6px; flex-wrap:wrap; }
 .tab { background:#1f2937; color:#e2e8f0; border:1px solid #334155; border-radius:999px; padding:6px 10px; cursor:pointer; }
