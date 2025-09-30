@@ -553,38 +553,42 @@ export function mountImportWizardEmbedded(container) {
       }
     }
     async function renderRoiEmbedded(){
-      const roiCanvas = container.querySelector('#pdfwiz-roi');
-      if (!roiCanvas || !pdfDoc) return;
+      const base = container.querySelector('#pdfwiz-roi-base');
+      const ov = container.querySelector('#pdfwiz-roi-overlay');
+      if (!base || !ov || !pdfDoc) return;
       const page = await pdfDoc.getPage(pageNo);
       const vp = page.getViewport({ scale: 0.8 });
-      roiCanvas.width = Math.ceil(vp.width);
-      roiCanvas.height = Math.ceil(vp.height);
-      const ctx = roiCanvas.getContext('2d');
+      base.width = Math.ceil(vp.width);
+      base.height = Math.ceil(vp.height);
+      ov.width = base.width;
+      ov.height = base.height;
+      const ctx = base.getContext('2d');
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
-      const r = rois[pageNo];
-      if (r && r.w>0 && r.h>0) {
-        const x=r.x*roiCanvas.width, y=r.y*roiCanvas.height, w=r.w*roiCanvas.width, h=r.h*roiCanvas.height;
-        ctx.save();
-        ctx.fillStyle='rgba(2,6,23,0.35)';
-        ctx.fillRect(0,0,roiCanvas.width,roiCanvas.height);
-        ctx.clearRect(x,y,w,h);
-        ctx.strokeStyle='#38bdf8'; ctx.setLineDash([8,5]); ctx.lineWidth=3;
-        ctx.strokeRect(x,y,w,h);
-        ctx.restore();
-      }
-      bindRoiEmbedded(roiCanvas);
+      drawRoiEmbeddedOverlay(ov, rois[pageNo]);
+      bindRoiEmbedded(ov);
     }
-    function bindRoiEmbedded(roiCanvas){
+    function drawRoiEmbeddedOverlay(canvas, roi){
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (!roi || roi.w<=0 || roi.h<=0) return;
+      const x=roi.x*canvas.width, y=roi.y*canvas.height, w=roi.w*canvas.width, h=roi.h*canvas.height;
+      ctx.save();
+      ctx.fillStyle='rgba(2,6,23,0.35)';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.clearRect(x,y,w,h);
+      ctx.strokeStyle='#38bdf8'; ctx.setLineDash([8,5]); ctx.lineWidth=4; ctx.strokeRect(x,y,w,h);
+      ctx.restore();
+    }
+    function bindRoiEmbedded(ov){
       let dragging=false, sx=0, sy=0, cx=0, cy=0;
       const clamp = (v)=> Math.max(0, Math.min(1, v));
-      const onDown = (e)=>{ const rect=roiCanvas.getBoundingClientRect(); sx=(e.clientX-rect.left)/rect.width; sy=(e.clientY-rect.top)/rect.height; cx=sx; cy=sy; dragging=true; e.preventDefault(); };
-      const onMove = (e)=>{ if(!dragging) return; const rect=roiCanvas.getBoundingClientRect(); cx=(e.clientX-rect.left)/rect.width; cy=(e.clientY-rect.top)/rect.height; const x=Math.min(sx,cx), y=Math.min(sy,cy), w=Math.abs(cx-sx), h=Math.abs(cy-sy); rois[pageNo]={x:clamp(x),y:clamp(y),w:clamp(w),h:clamp(h)}; renderRoiEmbedded(); e.preventDefault(); };
+      const onDown = (e)=>{ const rect=ov.getBoundingClientRect(); sx=(e.clientX-rect.left)/rect.width; sy=(e.clientY-rect.top)/rect.height; cx=sx; cy=sy; dragging=true; e.preventDefault(); };
+      const onMove = (e)=>{ if(!dragging) return; const rect=ov.getBoundingClientRect(); cx=(e.clientX-rect.left)/rect.width; cy=(e.clientY-rect.top)/rect.height; const x=Math.min(sx,cx), y=Math.min(sy,cy), w=Math.abs(cx-sx), h=Math.abs(cy-sy); rois[pageNo]={x:clamp(x),y:clamp(y),w:clamp(w),h:clamp(h)}; drawRoiEmbeddedOverlay(ov, rois[pageNo]); e.preventDefault(); };
       const onUp = ()=>{ dragging=false; };
-      roiCanvas.onmousedown = onDown; roiCanvas.onmousemove = onMove; roiCanvas.onmouseup=onUp; roiCanvas.onmouseleave=onUp;
-      // touch support
-      roiCanvas.ontouchstart = (e)=>{ if (e.touches[0]) onDown(e.touches[0]); };
-      roiCanvas.ontouchmove = (e)=>{ if (e.touches[0]) onMove(e.touches[0]); };
-      roiCanvas.ontouchend = onUp;
+      ov.onmousedown = onDown; ov.onmousemove = onMove; ov.onmouseup=onUp; ov.onmouseleave=onUp;
+      ov.ontouchstart = (e)=>{ if(e.touches[0]) onDown(e.touches[0]); };
+      ov.ontouchmove = (e)=>{ if(e.touches[0]) onMove(e.touches[0]); };
+      ov.ontouchend = onUp;
       const clr = container.querySelector('#pdfwiz-roi-clear'); if (clr) clr.onclick = ()=>{ delete rois[pageNo]; renderRoiEmbedded(); };
     }
     container.querySelector('#go-method')?.addEventListener('click', ()=> goto(2));
