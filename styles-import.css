@@ -6,6 +6,10 @@
 .pdfwiz-body { padding: 12px 16px; display: grid; gap: 12px; }
 .thumb-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; padding:8px; border:1px solid #1e293b; border-radius:6px; background:#0b1220; }
 canvas.thumb { outline: none; cursor: pointer; border:1px solid #334155; border-radius:4px; background:#0b1220; }
+.thumb-wrap { position: relative; display: inline-block; }
+.thumb-wrap.selected canvas.thumb { outline: 2px solid #38bdf8; outline-offset: 2px; }
+.thumb-check { position: absolute; top:6px; left:6px; width:18px; height:18px; z-index: 2; accent-color:#38bdf8; }
+.thumb-checkmark { position:absolute; top:6px; left:30px; font-size:12px; color:#9fb3c8; }
 .roi-canvas { display:block; max-width: 100%; height: auto; border:1px solid #1e293b; background:#0b1220; }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .muted { color:#9fb3c8; font-size:12px; }

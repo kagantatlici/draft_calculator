@@ -23,7 +23,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       file: null,
       pageNo: 1,
       kind: 'scan',
-      roi: null, // {x,y,w,h} in normalized [0..1]
+      rois: {}, // per-page ROI: { [pageNo]: {x,y,w,h} in [0..1] }
       table: null, // legacy single table {cells,csv,bboxes,confidence}
       tables: [], // multi-table support: Array<{cells,csv?,bboxes?,confidence?}>
       activeTable: 0, // index into tables
@@ -87,30 +87,42 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     const canvases = await renderThumbnails(state.pdf, grid);
     canvases.forEach(cv => {
       cv.classList.add('thumb');
-      cv.setAttribute('tabindex', '0');
-      cv.setAttribute('role', 'button');
-      cv.setAttribute('aria-label', `Sayfa ${cv.dataset.pageNo}`);
-      cv.style.outlineOffset = '2px';
       const pageNo = Number(cv.dataset.pageNo);
-      function toggleVisual() {
+      // Wrap canvas to host checkbox
+      const wrap = document.createElement('div');
+      wrap.className = 'thumb-wrap';
+      wrap.setAttribute('data-page', String(pageNo));
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'thumb-check';
+      chk.setAttribute('aria-label', `Sayfa ${pageNo} seç`);
+      const lbl = document.createElement('span');
+      lbl.className = 'thumb-checkmark';
+      wrap.appendChild(cv);
+      wrap.appendChild(chk);
+      wrap.appendChild(lbl);
+      grid.appendChild(wrap);
+      function sync() {
         const sel = state.selectedPages.includes(pageNo);
-        cv.style.outline = sel ? '2px solid #38bdf8' : '';
+        chk.checked = sel;
+        wrap.classList.toggle('selected', sel);
       }
-      cv.addEventListener('click', (e) => {
-        if (e.ctrlKey || e.metaKey) {
-          // toggle selection without changing primary page
-          const i = state.selectedPages.indexOf(pageNo);
-          if (i >= 0) state.selectedPages.splice(i,1); else state.selectedPages.push(pageNo);
-          toggleVisual();
-        } else {
-          selectPage(pageNo);
-        }
+      wrap.addEventListener('click', (e) => {
+        // Toggle selection on click anywhere in the thumbnail
+        if (e.target === chk) return; // checkbox handles itself
+        const i = state.selectedPages.indexOf(pageNo);
+        if (i >= 0) state.selectedPages.splice(i,1); else state.selectedPages.push(pageNo);
+        selectPage(pageNo); // also make it active
+        sync();
       });
-      cv.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') selectPage(pageNo);
+      chk.addEventListener('change', () => {
+        const i = state.selectedPages.indexOf(pageNo);
+        if (chk.checked) { if (i < 0) state.selectedPages.push(pageNo); }
+        else { if (i >= 0) state.selectedPages.splice(i,1); }
+        selectPage(pageNo);
+        sync();
       });
-      // initialize selected style if already selected
-      toggleVisual();
+      sync();
     });
     selectPage(1);
   }
@@ -123,18 +135,89 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       state.kind = detectPdfKind(items);
       overlay.querySelector('#pdfwiz-kind').textContent = state.kind === 'vector' ? 'Metin tabanlı' : 'Taranmış';
     }
-    // ROI kaldırıldı
+    await renderRoiCanvas();
   }
 
-  // ROI fonksiyonları kaldırıldı
+  // ROI çizim tuvali: kullanıcı seçim yaparsa otomatik ROI bypass
+  async function renderRoiCanvas() {
+    const cv = overlay.querySelector('#pdfwiz-roi');
+    if (!cv || !state.pdf) { return; }
+    const page = await state.pdf.getPage(state.pageNo);
+    const viewport = page.getViewport({ scale: 0.8 });
+    cv.width = Math.ceil(viewport.width);
+    cv.height = Math.ceil(viewport.height);
+    const ctx = cv.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    // draw existing ROI if present
+    const roi = state.rois[state.pageNo];
+    if (roi) {
+      ctx.save();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6,4]);
+      ctx.strokeRect(roi.x*cv.width, roi.y*cv.height, roi.w*cv.width, roi.h*cv.height);
+      ctx.restore();
+    }
+    bindRoiInteractions(cv);
+  }
+
+  function bindRoiInteractions(cv) {
+    let dragging = false; let startX=0, startY=0; let curX=0, curY=0;
+    const overlayDraw = () => {
+      // redraw background page then ROI rectangle
+      const redraw = async () => { await renderRoiCanvas(); };
+      redraw();
+    };
+    const onDown = (e) => {
+      const rect = cv.getBoundingClientRect();
+      startX = (e.clientX - rect.left) / cv.width;
+      startY = (e.clientY - rect.top) / cv.height;
+      curX = startX; curY = startY;
+      dragging = true;
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      const rect = cv.getBoundingClientRect();
+      curX = (e.clientX - rect.left) / cv.width;
+      curY = (e.clientY - rect.top) / cv.height;
+      const x = Math.min(startX, curX), y = Math.min(startY, curY);
+      const w = Math.abs(curX - startX), h = Math.abs(curY - startY);
+      state.rois[state.pageNo] = { x: clamp01(x), y: clamp01(y), w: clamp01(w), h: clamp01(h) };
+      // draw incremental rectangle on top
+      const ctx = cv.getContext('2d');
+      ctx.save();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6,4]);
+      ctx.strokeRect(x*cv.width, y*cv.height, w*cv.width, h*cv.height);
+      ctx.restore();
+      e.preventDefault();
+    };
+    const onUp = () => { dragging = false; };
+    // Bind once per canvas render
+    cv.onmousedown = onDown;
+    cv.onmousemove = onMove;
+    cv.onmouseup = onUp;
+    cv.onmouseleave = onUp;
+    // touch support
+    cv.ontouchstart = (e)=>{ if (e.touches[0]) onDown(e.touches[0]); };
+    cv.ontouchmove = (e)=>{ if (e.touches[0]) onMove(e.touches[0]); };
+    cv.ontouchend = onUp;
+    // Clear button
+    const clearBtn = overlay.querySelector('#pdfwiz-roi-clear');
+    if (clearBtn) clearBtn.onclick = ()=>{ delete state.rois[state.pageNo]; renderRoiCanvas(); };
+  }
+
+  function clamp01(v){ return Math.max(0, Math.min(1, v)); }
 
   async function runExtraction() {
     const method = overlay.querySelector('input[name="method"]:checked')?.value || 'client';
     const status = overlay.querySelector('#pdfwiz-status');
     status.textContent = 'Çıkarım çalışıyor...';
-    const image = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''))
-      ? state.file
-      : await cropPageToImage(state.pdf, state.pageNo, null);
+    const isImageUpload = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''));
+    const curRoi = state.rois[state.pageNo] || null;
+    const image = isImageUpload ? state.file : await cropPageToImage(state.pdf, state.pageNo, curRoi);
     let table = null;
     try {
       if (method === 'client') {
@@ -148,20 +231,35 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
         }
       } else if (method === 'llamaparse') {
         try {
-          // If original upload was a PDF, send selected pages (multi-select) as a new PDF
-          const isPdf = state.file && ((state.file.type||'').includes('pdf') || /\.pdf$/i.test(state.file.name||''));
+          // If original upload was a PDF, respect selected pages and ROI. Build a new PDF:
           let toSend = state.file || image;
-          if (isPdf && typeof window.PDFLib !== 'undefined') {
+          const isPdf = state.file && ((state.file.type||'').includes('pdf') || /\.pdf$/i.test(state.file.name||''));
+          if (isPdf && typeof window.PDFLib !== 'undefined' && state.pdf) {
+            const PDFDocument = window.PDFLib.PDFDocument;
+            const newDoc = await PDFDocument.create();
+            const total = state.pdf.numPages;
+            const pages = Array.from(new Set((state.selectedPages||[]).filter(n=> n>=1 && n<=total)));
+            const usePages = pages.length ? pages : [state.pageNo];
             try {
-              const PDFDocument = window.PDFLib.PDFDocument;
-              const origBytes = await state.file.arrayBuffer();
-              const src = await PDFDocument.load(origBytes);
-              const newDoc = await PDFDocument.create();
-              const total = src.getPageCount();
-              const uniqueSelected = Array.from(new Set((state.selectedPages||[]).filter(n=> n>=1 && n<=total)));
-              const indices = uniqueSelected.length ? uniqueSelected.map(n=> n-1) : [Math.max(0, Math.min(total-1, (state.pageNo||1)-1))];
-              const copiedPages = await newDoc.copyPages(src, indices);
-              copiedPages.forEach(p => newDoc.addPage(p));
+              // If any ROI is set, rasterize all selected pages to images with ROI/no-ROI and embed as image pages
+              const anyRoi = usePages.some(p => !!state.rois[p]);
+              if (anyRoi) {
+                for (const p of usePages) {
+                  const roi = state.rois[p] || null;
+                  const blob = await cropPageToImage(state.pdf, p, roi);
+                  const bytes = new Uint8Array(await blob.arrayBuffer());
+                  const png = await newDoc.embedPng(bytes);
+                  const { width, height } = png.scale(1);
+                  const page = newDoc.addPage([width, height]);
+                  page.drawImage(png, { x: 0, y: 0, width, height });
+                }
+              } else {
+                // No ROI -> copy full pages losslessly from original file bytes
+                const origBytes = await state.file.arrayBuffer();
+                const src = await PDFDocument.load(origBytes);
+                const copied = await newDoc.copyPages(src, usePages.map(n=>n-1));
+                copied.forEach(p => newDoc.addPage(p));
+              }
               const outBytes = await newDoc.save();
               toSend = new Blob([outBytes], { type: 'application/pdf' });
             } catch(_) { /* fallback to original file/image */ }
@@ -325,6 +423,9 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
         <input id="pdfwiz-file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/*" />
         <div id="pdfwiz-thumbs" class="thumb-grid" aria-label="Sayfa küçük resimleri"></div>
         <div class="muted">Seçili sayfa: <span id="pdfwiz-pageno">-</span> • Tür: <span id="pdfwiz-kind">-</span></div>
+        <div class="muted" style="margin-top:6px;">ROI (isteğe bağlı): ilgili alanı tuval üzerinde sürükleyerek çizin.</div>
+        <canvas id="pdfwiz-roi" class="roi-canvas" aria-label="ROI seçim tuvali"></canvas>
+        <div class="row"><button id="pdfwiz-roi-clear" class="secondary">ROI’yi Temizle</button></div>
         <div class="row">
           <input id="pdfwiz-search" type="search" placeholder="Anahtar kelime (Hydrostatic, TPC, MCT...)" />
           <button id="go-method">Devam ➜</button>
@@ -417,16 +518,25 @@ export function mountImportWizardEmbedded(container) {
         const grid = container.querySelector('#pdfwiz-thumbs');
         const canvases = await renderThumbnails(pdfDoc, grid);
         canvases.forEach(cv => {
-          cv.classList.add('thumb'); cv.setAttribute('tabindex','0'); cv.setAttribute('role','button');
+          cv.classList.add('thumb');
           const no = Number(cv.dataset.pageNo);
-          cv.style.outlineOffset = '2px';
-          function toggleVisual(){ const sel = selectedPages.includes(no); cv.style.outline = sel? '2px solid #38bdf8' : ''; }
-          cv.addEventListener('click', (ev)=>{
-            if (ev.ctrlKey || ev.metaKey){ const i=selectedPages.indexOf(no); if(i>=0) selectedPages.splice(i,1); else selectedPages.push(no); toggleVisual(); }
-            else selectPage(Number(cv.dataset.pageNo));
-          });
-          cv.addEventListener('keydown', (ev)=>{ if (ev.key==='Enter'||ev.key===' ') selectPage(Number(cv.dataset.pageNo)); });
-          toggleVisual();
+          const wrap = document.createElement('div');
+          wrap.className = 'thumb-wrap';
+          wrap.setAttribute('data-page', String(no));
+          const chk = document.createElement('input');
+          chk.type = 'checkbox';
+          chk.className = 'thumb-check';
+          chk.setAttribute('aria-label', `Sayfa ${no} seç`);
+          const lbl = document.createElement('span');
+          lbl.className = 'thumb-checkmark';
+          wrap.appendChild(cv);
+          wrap.appendChild(chk);
+          wrap.appendChild(lbl);
+          grid.appendChild(wrap);
+          function sync(){ const sel = selectedPages.includes(no); chk.checked = sel; wrap.classList.toggle('selected', sel); }
+          wrap.addEventListener('click', (ev)=>{ if (ev.target===chk) return; const i=selectedPages.indexOf(no); if (i>=0) selectedPages.splice(i,1); else selectedPages.push(no); selectPage(no); sync(); });
+          chk.addEventListener('change', ()=>{ const i=selectedPages.indexOf(no); if (chk.checked){ if(i<0) selectedPages.push(no);} else { if(i>=0) selectedPages.splice(i,1);} selectPage(no); sync(); });
+          sync();
         });
         selectPage(1);
       }
@@ -436,15 +546,45 @@ export function mountImportWizardEmbedded(container) {
       if (pdfDoc) {
         const items = await getPageTextItems(pdfDoc, no); kind = detectPdfKind(items);
         container.querySelector('#pdfwiz-kind').textContent = kind==='vector'?'Metin tabanlı':'Taranmış';
+        await renderRoiEmbedded();
       }
-      // ROI removed
     }
-    async function renderRoiCanvas(){ /* ROI removed */ }
+    async function renderRoiEmbedded(){
+      const roiCanvas = container.querySelector('#pdfwiz-roi');
+      if (!roiCanvas || !pdfDoc) return;
+      const page = await pdfDoc.getPage(pageNo);
+      const vp = page.getViewport({ scale: 0.8 });
+      roiCanvas.width = Math.ceil(vp.width);
+      roiCanvas.height = Math.ceil(vp.height);
+      const ctx = roiCanvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const r = rois[pageNo];
+      if (r) {
+        ctx.save(); ctx.strokeStyle = '#38bdf8'; ctx.setLineDash([6,4]); ctx.lineWidth = 2;
+        ctx.strokeRect(r.x*roiCanvas.width, r.y*roiCanvas.height, r.w*roiCanvas.width, r.h*roiCanvas.height);
+        ctx.restore();
+      }
+      bindRoiEmbedded(roiCanvas);
+    }
+    function bindRoiEmbedded(roiCanvas){
+      let dragging=false, sx=0, sy=0, cx=0, cy=0;
+      const clamp = (v)=> Math.max(0, Math.min(1, v));
+      const onDown = (e)=>{ const rect=roiCanvas.getBoundingClientRect(); sx=(e.clientX-rect.left)/roiCanvas.width; sy=(e.clientY-rect.top)/roiCanvas.height; cx=sx; cy=sy; dragging=true; e.preventDefault(); };
+      const onMove = (e)=>{ if(!dragging) return; const rect=roiCanvas.getBoundingClientRect(); cx=(e.clientX-rect.left)/roiCanvas.width; cy=(e.clientY-rect.top)/roiCanvas.height; const x=Math.min(sx,cx), y=Math.min(sy,cy), w=Math.abs(cx-sx), h=Math.abs(cy-sy); rois[pageNo]={x:clamp(x),y:clamp(y),w:clamp(w),h:clamp(h)}; const ctx=roiCanvas.getContext('2d'); ctx.save(); ctx.strokeStyle='#38bdf8'; ctx.setLineDash([6,4]); ctx.lineWidth=2; ctx.strokeRect(x*roiCanvas.width,y*roiCanvas.height,w*roiCanvas.width,h*roiCanvas.height); ctx.restore(); e.preventDefault(); };
+      const onUp = ()=>{ dragging=false; };
+      roiCanvas.onmousedown = onDown; roiCanvas.onmousemove = onMove; roiCanvas.onmouseup=onUp; roiCanvas.onmouseleave=onUp;
+      // touch support
+      roiCanvas.ontouchstart = (e)=>{ if (e.touches[0]) onDown(e.touches[0]); };
+      roiCanvas.ontouchmove = (e)=>{ if (e.touches[0]) onMove(e.touches[0]); };
+      roiCanvas.ontouchend = onUp;
+      const clr = container.querySelector('#pdfwiz-roi-clear'); if (clr) clr.onclick = ()=>{ delete rois[pageNo]; renderRoiEmbedded(); };
+    }
     container.querySelector('#go-method')?.addEventListener('click', ()=> goto(2));
     container.querySelector('#go-extract')?.addEventListener('click', async ()=>{
       const method = container.querySelector('input[name="method"]:checked')?.value || 'client';
       status.textContent = 'Çıkarım çalışıyor...';
-      const image = imgBlob ? imgBlob : await cropPageToImage(pdfDoc, pageNo, null);
+      const roi = imgBlob ? null : (rois[pageNo] || null);
+      const image = imgBlob ? imgBlob : await cropPageToImage(pdfDoc, pageNo, roi);
       try {
         if (method==='client') {
           if (pdfDoc && kind === 'vector') {
@@ -455,7 +595,25 @@ export function mountImportWizardEmbedded(container) {
           }
         } else if (method==='llamaparse') {
           try {
-            let toSend = imgBlob || (await cropPageToImage(pdfDoc, pageNo, null));
+            let toSend = imgBlob || (await cropPageToImage(pdfDoc, pageNo, roi));
+            if (pdfDoc && !imgBlob && typeof window.PDFLib !== 'undefined') {
+              const PDFDocument = window.PDFLib.PDFDocument; const newDoc = await PDFDocument.create();
+              const usePages = (selectedPages&&selectedPages.length)? selectedPages : [pageNo];
+              const anyRoi = usePages.some(p => !!rois[p]);
+              if (anyRoi) {
+                for (const p of usePages) {
+                  const r = rois[p] || null;
+                  const blob = await cropPageToImage(pdfDoc, p, r);
+                  const bytes = new Uint8Array(await blob.arrayBuffer());
+                  const png = await newDoc.embedPng(bytes);
+                  const { width, height } = png.scale(1);
+                  const pg = newDoc.addPage([width, height]);
+                  pg.drawImage(png, { x:0, y:0, width, height });
+                }
+                const outBytes = await newDoc.save();
+                toSend = new Blob([outBytes], { type:'application/pdf' });
+              }
+            }
             const out = await parseWithLlamaParse(toSend);
             const arr = Array.isArray(out.tables) && out.tables.length ? out.tables : [out.cells||[]];
             tables = arr.map(cells => {

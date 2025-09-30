@@ -923,10 +923,14 @@ function bindWizardOnce() {
 function buildShipJsonFromWizard() {
   const name = document.getElementById('wiz-name').value.trim() || 'NEW SHIP';
   const id = document.getElementById('wiz-id').value.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-  const lbp = toNumber(document.getElementById('wiz-lbp').value);
-  const rho = toNumber(document.getElementById('wiz-rho').value);
-  const lsw = toNumber(document.getElementById('wiz-ls-w').value);
-  const lsx = toNumber(document.getElementById('wiz-ls-x').value);
+  const lbpEl = document.getElementById('wiz-lbp');
+  const rhoEl = document.getElementById('wiz-rho');
+  const lswEl = document.getElementById('wiz-ls-w');
+  const lsxEl = document.getElementById('wiz-ls-x');
+  const lbp = lbpEl ? toNumber(lbpEl.value) : NaN;
+  const rho = rhoEl ? toNumber(rhoEl.value) : NaN;
+  const lsw = lswEl ? toNumber(lswEl.value) : NaN;
+  const lsx = lsxEl ? toNumber(lsxEl.value) : NaN;
   const cargo = WIZ.cargo.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const ballast = WIZ.ballast.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const cons = WIZ.cons.map(t=>({ name:t.name, type:t.type, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
@@ -942,8 +946,8 @@ function buildShipJsonFromWizard() {
   return {
     ship: {
       id, name,
-      lbp: isFinite(lbp) ? lbp : SHIP.LBP,
-      rho_ref: isFinite(rho) ? rho : SHIP.RHO_REF,
+      lbp: isFinite(lbp) ? lbp : undefined,
+      rho_ref: isFinite(rho) ? rho : undefined,
       light_ship: (isFinite(lsw) && isFinite(lsx)) ? { weight: lsw, lcg: lsx } : undefined,
     },
     hydrostatics: { rows: hydro },
