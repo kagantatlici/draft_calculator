@@ -77,7 +77,15 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     // Next buttons (ROI adımı kaldırıldı)
     overlay.querySelector('#go-method')?.addEventListener('click', ()=> gotoStep(2));
     overlay.querySelector('#go-extract')?.addEventListener('click', runExtraction);
-    overlay.querySelector('#pdfwiz-refine')?.addEventListener('click', refinePass);
+    overlay.querySelector('#pdfwiz-interp')?.addEventListener('click', ()=>{
+      try{
+        const tables = Array.isArray(state.tables) ? state.tables : (state.table ? [state.table] : []);
+        const cur = tables[state.activeTable] || tables[0];
+        const headers = (cur && cur.cells && cur.cells[0]) ? cur.cells[0] : [];
+        const mapAll = overlay.querySelector('#map-apply-all');
+        applyMapping(headers, !!mapAll?.checked);
+      }catch(e){ /* noop */ }
+    });
     overlay.querySelector('#go-apply')?.addEventListener('click', applyToApp);
     overlay.querySelector('#go-download')?.addEventListener('click', downloadJson);
   }
@@ -229,7 +237,6 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     const method = overlay.querySelector('input[name="method"]:checked')?.value || 'client';
     const status = overlay.querySelector('#pdfwiz-status');
     status.textContent = 'Çıkarım çalışıyor...';
-    state.lastMethod = method;
     const isImageUpload = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''));
     const curRoi = state.rois[state.pageNo] || null;
     const image = isImageUpload ? state.file : await cropPageToImage(state.pdf, state.pageNo, curRoi);
@@ -307,38 +314,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     status.textContent = 'Bitti.';
   }
 
-  // Try an alternate engine to improve missing reads
-  async function refinePass(){
-    const status = overlay.querySelector('#pdfwiz-status');
-    try{
-      status.textContent = 'Eksikleri iyileştirme (2. geçiş)...';
-      const useClient = (state.lastMethod === 'llamaparse');
-      if (useClient) {
-        // Run client OCR on current page (with ROI if any)
-        const isImageUpload = state.file && (/^image\//i.test(state.file.type) || /\.(png|jpe?g|webp)$/i.test(state.file.name||''));
-        const curRoi = state.rois[state.pageNo] || null;
-        const image = isImageUpload ? state.file : await cropPageToImage(state.pdf, state.pageNo, curRoi);
-        const ocr = await ocrClient(image, { lang: 'eng+tur', psm: 4 }); // alternate psm
-        const table = tableFromOcr(ocr.words, null, { useOpenCV: true });
-        state.tables = [table];
-        state.activeTable = 0;
-      } else {
-        // Use LlamaParse as alternate
-        let toSend = state.file;
-        if (!toSend && state.pdf) {
-          const blob = await cropPageToImage(state.pdf, state.pageNo, state.rois[state.pageNo]||null);
-          toSend = blob;
-        }
-        const lp = await parseWithLlamaParse(toSend);
-        const tables = Array.isArray(lp.tables) && lp.tables.length ? lp.tables : [lp.cells || []];
-        state.tables = tables.map(cells => ({ cells, csv: lp.markdown||lp.md||'' }));
-        state.activeTable = 0;
-      }
-      renderTablePreview();
-      gotoStep(3);
-      status.textContent = 'Bitti.';
-    }catch(e){ status.textContent = 'İyileştirme hatası: ' + (e.message||e); }
-  }
+  // (refinePass removed per request)
 
   function renderTablePreview() {
     const tables = Array.isArray(state.tables) ? state.tables : (state.table ? [state.table] : []);
@@ -518,7 +494,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
             <div id="pdfwiz-validate" style="margin-top:8px;"></div>
           </div>
         </div>
-        <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button><button id="pdfwiz-refine" class="secondary">Eksikleri İyileştir (2. geçiş)</button></div>
+        <div class="row"><button id="go-apply">App’e Aktar</button><button id="go-download" class="secondary">JSON indir</button><button id="pdfwiz-interp" class="secondary">Eksikleri Doldur (enterpolasyon)</button></div>
       </div>
       <div id="pdfwiz-status" class="muted"></div>
     </div>
@@ -738,18 +714,12 @@ export function mountImportWizardEmbedded(container) {
       container.querySelector('#pdfwiz-validate').innerHTML = (info? `<div class="ok">${info}</div>`:'') + renderValidation(v);
       container.dataset.rows = JSON.stringify(filled);
     }
-    // Refine second pass (alternate engine)
-    container.querySelector('#pdfwiz-refine')?.addEventListener('click', async ()=>{
-      status.textContent = 'Eksikleri iyileştirme (2. geçiş)...';
-      try{
-        const roi = imgBlob ? null : (rois[pageNo]||null);
-        if (pdfDoc) {
-          const image = imgBlob ? imgBlob : await cropPageToImage(pdfDoc, pageNo, roi);
-          const ocr = await ocrClient(image,{lang:'eng+tur',psm:4});
-          const t = tableFromOcr(ocr.words, null, {useOpenCV:true}); tables = [t]; activeTable=0; renderPreviewEmbedded();
-        }
-        status.textContent = 'Bitti.';
-      }catch(e){ status.textContent = 'İyileştirme hatası: '+(e.message||e); }
+    // Interpolation button: re-run mapping with current headers
+    container.querySelector('#pdfwiz-interp')?.addEventListener('click', ()=>{
+      const cur = (tables && tables.length) ? tables[activeTable] : null;
+      const headers = cur && cur.cells ? cur.cells[0] : [];
+      const applyAll = !!container.querySelector('#map-apply-all')?.checked;
+      applyMap(headers, applyAll);
     });
     container.querySelector('#go-apply')?.addEventListener('click', ()=>{
       const rows = JSON.parse(container.dataset.rows||'[]'); if(!rows.length){ alert('Aktarılacak satır yok.'); return; }
