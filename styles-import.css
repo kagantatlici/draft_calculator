@@ -13,7 +13,7 @@ canvas.thumb { outline: none; cursor: pointer; border:1px solid #334155; border-
 .roi-canvas { display:block; max-width: 100%; height: auto; border:1px solid #1e293b; background:#0b1220; }
 .roi-canvas { cursor: crosshair; }
 .roi-wrap { position: relative; display: inline-block; }
-.roi-overlay { position: absolute; left: 0; top: 0; border: none; background: transparent; pointer-events: auto; }
+.roi-overlay { position: absolute; left: 0; top: 0; border: none; background: transparent; pointer-events: auto; z-index: 1; }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .muted { color:#9fb3c8; font-size:12px; }
 .info { color:#93c5fd; font-size:12px; }

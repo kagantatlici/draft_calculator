@@ -151,6 +151,8 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     ov.height = base.height;
     const ctx = base.getContext('2d');
     await page.render({ canvasContext: ctx, viewport }).promise;
+    // Sync CSS size so overlay event coords map correctly
+    syncOverlayCssSize(base, ov);
     drawRoiOverlay(ov, state.rois[state.pageNo]);
     bindRoiInteractions(ov);
   }
@@ -171,6 +173,17 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     ctx.setLineDash([8,5]);
     ctx.strokeRect(x,y,w,h);
     ctx.restore();
+  }
+
+  function syncOverlayCssSize(baseCanvas, overlayCanvas){
+    try{
+      const w = baseCanvas.clientWidth || baseCanvas.width;
+      const h = baseCanvas.clientHeight || baseCanvas.height;
+      overlayCanvas.style.width = `${Math.max(1, Math.floor(w))}px`;
+      overlayCanvas.style.height = `${Math.max(1, Math.floor(h))}px`;
+      overlayCanvas.style.left = '0px';
+      overlayCanvas.style.top = '0px';
+    }catch(_){ /* noop */ }
   }
 
   function bindRoiInteractions(cv) {
@@ -564,6 +577,8 @@ export function mountImportWizardEmbedded(container) {
       ov.height = base.height;
       const ctx = base.getContext('2d');
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      // Sync CSS size so overlay event coords map correctly
+      try{ const w = base.clientWidth || base.width; const h = base.clientHeight || base.height; ov.style.width = `${Math.max(1, Math.floor(w))}px`; ov.style.height = `${Math.max(1, Math.floor(h))}px`; ov.style.left='0px'; ov.style.top='0px'; }catch(_){ }
       drawRoiEmbeddedOverlay(ov, rois[pageNo]);
       bindRoiEmbedded(ov);
     }
