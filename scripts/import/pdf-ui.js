@@ -140,37 +140,37 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
 
   // ROI çizim tuvali: kullanıcı seçim yaparsa otomatik ROI bypass
   async function renderRoiCanvas() {
-    const cv = overlay.querySelector('#pdfwiz-roi');
-    if (!cv || !state.pdf) { return; }
+    const base = overlay.querySelector('#pdfwiz-roi-base');
+    const ov = overlay.querySelector('#pdfwiz-roi-overlay');
+    if (!base || !ov || !state.pdf) { return; }
     const page = await state.pdf.getPage(state.pageNo);
     const viewport = page.getViewport({ scale: 0.8 });
-    cv.width = Math.ceil(viewport.width);
-    cv.height = Math.ceil(viewport.height);
-    const ctx = cv.getContext('2d');
+    base.width = Math.ceil(viewport.width);
+    base.height = Math.ceil(viewport.height);
+    ov.width = base.width;
+    ov.height = base.height;
+    const ctx = base.getContext('2d');
     await page.render({ canvasContext: ctx, viewport }).promise;
-    // draw existing ROI if present
-    const roi = state.rois[state.pageNo];
-    if (roi && roi.w>0 && roi.h>0) {
-      const x = roi.x*cv.width, y = roi.y*cv.height, w = roi.w*cv.width, h = roi.h*cv.height;
-      ctx.save();
-      // Highlight ROI area with subtle fill
-      ctx.globalAlpha = 0.10;
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(x, y, w, h);
-      ctx.globalAlpha = 1.0;
-      // Thick dashed border
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 4;
-      ctx.setLineDash([8,5]);
-      ctx.strokeRect(x, y, w, h);
-      // Outer dark border to increase contrast
-      ctx.setLineDash([]);
-      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x-0.5, y-0.5, w+1, h+1);
-      ctx.restore();
-    }
-    bindRoiInteractions(cv);
+    drawRoiOverlay(ov, state.rois[state.pageNo]);
+    bindRoiInteractions(ov);
+  }
+
+  function drawRoiOverlay(canvas, roi) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (!roi || roi.w<=0 || roi.h<=0) return;
+    const x = roi.x*canvas.width, y = roi.y*canvas.height, w = roi.w*canvas.width, h = roi.h*canvas.height;
+    // Shade outside ROI for visibility
+    ctx.save();
+    ctx.fillStyle='rgba(2,6,23,0.35)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.clearRect(x,y,w,h);
+    // Thick dashed border
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([8,5]);
+    ctx.strokeRect(x,y,w,h);
+    ctx.restore();
   }
 
   function bindRoiInteractions(cv) {
@@ -191,8 +191,7 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
       const x = Math.min(startX, curX), y = Math.min(startY, curY);
       const w = Math.abs(curX - startX), h = Math.abs(curY - startY);
       state.rois[state.pageNo] = { x: clamp01(x), y: clamp01(y), w: clamp01(w), h: clamp01(h) };
-      // redraw with ROI
-      renderRoiCanvas();
+      drawRoiOverlay(cv, state.rois[state.pageNo]);
       e.preventDefault();
     };
     const onUp = () => { dragging = false; };
