@@ -150,12 +150,24 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     await page.render({ canvasContext: ctx, viewport }).promise;
     // draw existing ROI if present
     const roi = state.rois[state.pageNo];
-    if (roi) {
+    if (roi && roi.w>0 && roi.h>0) {
+      const x = roi.x*cv.width, y = roi.y*cv.height, w = roi.w*cv.width, h = roi.h*cv.height;
       ctx.save();
+      // Highlight ROI area with subtle fill
+      ctx.globalAlpha = 0.10;
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = 1.0;
+      // Thick dashed border
       ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6,4]);
-      ctx.strokeRect(roi.x*cv.width, roi.y*cv.height, roi.w*cv.width, roi.h*cv.height);
+      ctx.lineWidth = 4;
+      ctx.setLineDash([8,5]);
+      ctx.strokeRect(x, y, w, h);
+      // Outer dark border to increase contrast
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x-0.5, y-0.5, w+1, h+1);
       ctx.restore();
     }
     bindRoiInteractions(cv);
@@ -413,7 +425,10 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
         <div id="pdfwiz-thumbs" class="thumb-grid" aria-label="Sayfa küçük resimleri"></div>
         <div class="muted">Seçili sayfa: <span id="pdfwiz-pageno">-</span> • Tür: <span id="pdfwiz-kind">-</span></div>
         <div class="muted" style="margin-top:6px;">ROI (isteğe bağlı): ilgili alanı tuval üzerinde sürükleyerek çizin.</div>
-        <canvas id="pdfwiz-roi" class="roi-canvas" aria-label="ROI seçim tuvali"></canvas>
+        <div class="roi-wrap">
+          <canvas id="pdfwiz-roi-base" class="roi-canvas" aria-label="Sayfa görüntüsü"></canvas>
+          <canvas id="pdfwiz-roi-overlay" class="roi-canvas roi-overlay" aria-label="ROI seçim tuvali"></canvas>
+        </div>
         <div class="row"><button id="pdfwiz-roi-clear" class="secondary">ROI’yi Temizle</button></div>
         <div class="row">
           <input id="pdfwiz-search" type="search" placeholder="Anahtar kelime (Hydrostatic, TPC, MCT...)" />
