@@ -430,12 +430,17 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
     // Render validation with extra info
     const rep = overlay.querySelector('#pdfwiz-validate');
     rep.innerHTML = (info? `<div class="ok">${info} • Enterpolasyonlu satırlar önizlemede vurgulandı.</div>` : '') + renderValidation(v);
-    // Persist rows for apply
-    overlay.dataset.rows = JSON.stringify(filled);
+    // Persist rows for apply (sorted by draft to match JSON export)
+    const pairs = filled.map((r,i)=> ({ r, i, label: originLabels[i], fields: (filledByField && filledByField[i])||[] }));
+    pairs.sort((a,b)=> a.r.draft_m - b.r.draft_m);
+    const sortedRows = pairs.map(p=> p.r);
+    const labelsSorted = pairs.map(p=> p.label);
+    const fieldsSorted = Object.fromEntries(pairs.map((p,idx)=> [labelsSorted[idx], p.fields]));
+    overlay.dataset.rows = JSON.stringify(sortedRows);
     overlay.dataset.interp = JSON.stringify([...interpolatedIdx]);
     overlay.dataset.interpLabels = JSON.stringify([...interpolatedIdx].map(i => originLabels[i]));
-    overlay.dataset.interpCells = JSON.stringify(Object.fromEntries(Object.entries(filledByField).map(([i,arr])=>[originLabels[Number(i)],arr])));
-    renderMappedPreview(filled, originLabels, filledByField);
+    overlay.dataset.interpCells = JSON.stringify(fieldsSorted);
+    renderMappedPreview(sortedRows, labelsSorted, filledByField);
     // Build patched view for active table only so user sees filled values directly
     try {
       const ti = state.activeTable;
@@ -490,7 +495,12 @@ import { parseWithLlamaParse } from './llamaparse-service.js?v=lp3';
   function applyToApp() {
     const rows = JSON.parse(overlay.dataset.rows || '[]');
     if (!rows.length) { alert('Aktarılacak satır bulunamadı.'); return; }
-    const compat = rows.map(r=> ({ draft_m: r.draft_m, lcf_m: r.lcf_m, tpc: r.tpc_t_per_cm, mct: r.mct1cm_t_m_per_cm }));
+    const compat = rows.map(r=> ({
+      draft_m: r.draft_m,
+      lcf_m: r.lcf_m,
+      tpc: (isFinite(r.tpc)? r.tpc : r.tpc_t_per_cm),
+      mct: (isFinite(r.mct)? r.mct : r.mct1cm_t_m_per_cm)
+    }));
     if (typeof window.applyHydrostaticsJson === 'function') {
       window.applyHydrostaticsJson({ rows: compat });
       alert('Hydrostatik tablo uygulandı.');
@@ -806,7 +816,12 @@ export function mountImportWizardEmbedded(container) {
     });
     container.querySelector('#go-apply')?.addEventListener('click', ()=>{
       const rows = JSON.parse(container.dataset.rows||'[]'); if(!rows.length){ alert('Aktarılacak satır yok.'); return; }
-      const compat = rows.map(r=>({draft_m:r.draft_m,lcf_m:r.lcf_m,tpc:r.tpc_t_per_cm,mct:r.mct1cm_t_m_per_cm}));
+      const compat = rows.map(r=>({
+        draft_m:r.draft_m,
+        lcf_m:r.lcf_m,
+        tpc: (isFinite(r.tpc)? r.tpc : r.tpc_t_per_cm),
+        mct: (isFinite(r.mct)? r.mct : r.mct1cm_t_m_per_cm)
+      }));
       if (typeof window.applyHydrostaticsJson==='function'){ window.applyHydrostaticsJson({rows: compat}); alert('Hydrostatik tablo uygulandı.'); container.style.display='none'; container.innerHTML=''; }
     });
     container.querySelector('#go-download')?.addEventListener('click', ()=>{
