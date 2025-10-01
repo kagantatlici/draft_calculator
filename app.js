@@ -571,7 +571,10 @@ async function handleQuickFiles(fileList) {
   for (const f of fileList) {
     try {
       const text = await readFileAsText(f);
-      const isCSV = /\.(csv|tsv)$/i.test(f.name || '') || /^\s*(tank|name|draft|vol|volume|lcg)/i.test(text);
+      const first = String(text).split(/\r?\n/)[0] || '';
+      const hasComma = (first.split(',').length-1) >= 2;
+      const hasTab = (first.split('\t').length-1) >= 2;
+      const isCSV = /\.(csv|tsv)$/i.test(f.name || '') || hasComma || hasTab;
       if (isCSV) {
         const parsed = parseCsvSmart(text);
         if (parsed.kind === 'hydro') {
@@ -826,6 +829,42 @@ function parseCsvSmart(text) {
       const cap = idx.vol>=0? toNumber(cols[idx.vol]) : undefined;
       const entry = { name, lcg, cap_m3: isFinite(cap)? cap : undefined };
       const cls = classifyTank(name);
+      if (cls.cat==='cargo') cargo.push(entry);
+      else if (cls.cat==='ballast') ballast.push(entry);
+      else cons.push({ ...entry, type: cls.type||'fuel' });
+    }
+    return { kind:'tanks', cargo, ballast, cons };
+  }
+  // No headers: try to infer (name, vol, lcg) layout if tokens >=3
+  const tokens = splitLine(lines[0], delim);
+  if (tokens.length >= 3) {
+    const cargo=[], ballast=[], cons=[];
+    const any = (s, arr)=> arr.some(re=> re.test(s));
+    const pat = {
+      cargo: [/(^|\b)(cot|cargo)(\b|\(|\d)/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
+      ballast: [/\b(wbt|wb|w\.b\.|wing\s*ballast)\b/i, /\bswbt\b/i, /\bbwbt\b/i, /\bdbt\b/i, /double\s*bottom/i, /\bfpt\b|fore\s*peak/i, /\bapt\b|after\s*peak/i, /\bcwt\b/i, /\bballast\b/i],
+      fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/i],
+      fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
+      lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil|hyd\.o|hydraulic|lubric/i]
+    };
+    const classify = (name)=>{
+      const raw = String(name||''); const s = raw.toLowerCase();
+      if (any(raw, pat.cargo) || any(s, pat.cargo)) return { cat:'cargo' };
+      if (any(raw, pat.ballast) || any(s, pat.ballast)) return { cat:'ballast' };
+      if (any(raw, pat.fw) || any(s, pat.fw)) return { cat:'cons', type:'freshwater' };
+      if (any(raw, pat.lube) || any(s, pat.lube)) return { cat:'cons', type:'lube' };
+      if (any(raw, pat.fuel) || any(s, pat.fuel)) return { cat:'cons', type:'fuel' };
+      if (/water|tank/i.test(raw)) return { cat:'ballast' };
+      return { cat:'cons', type:'fuel' };
+    };
+    for (let i=0;i<lines.length;i++){
+      const cols = splitLine(lines[i], delim);
+      if (cols.length < 3) continue;
+      const name = String(cols[0]||'').trim(); if (!name) continue;
+      const vol = toNumber(cols[1]);
+      const lcg = toNumber(cols[cols.length-1]); if (!isFinite(lcg)) continue;
+      const entry = { name, lcg, cap_m3: isFinite(vol)? vol : undefined };
+      const cls = classify(name);
       if (cls.cat==='cargo') cargo.push(entry);
       else if (cls.cat==='ballast') ballast.push(entry);
       else cons.push({ ...entry, type: cls.type||'fuel' });
