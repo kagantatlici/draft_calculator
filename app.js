@@ -992,3 +992,85 @@ function applyHydrostaticsJson(hydroJson) {
 
 // expose for module usage
 window.applyHydrostaticsJson = applyHydrostaticsJson;
+
+// ---- Wizard helper views (requirements + editable previews) ----
+function updateRequirementHints() {
+  const el = document.getElementById('wiz-lints');
+  if (!el) return;
+  const has = { draft:false, tpc:false, mct:false, lcf:false, dis:false, lcb:false };
+  for (const r of (WIZ.hydro||[])) {
+    if (isFinite(r?.draft_m)) has.draft = true;
+    if (isFinite(r?.tpc)) has.tpc = true;
+    if (isFinite(r?.mct)) has.mct = true;
+    if (isFinite(r?.lcf_m)) has.lcf = true;
+    if (isFinite(r?.dis_fw) || isFinite(r?.dis_sw)) has.dis = true;
+    if (isFinite(r?.lcb_m)) has.lcb = true;
+  }
+  const missing = [];
+  if (!has.draft) missing.push('Draft (m)');
+  if (!has.tpc) missing.push('TPC (t/cm)');
+  if (!has.mct) missing.push('MCT1cm (t·m/cm)');
+  const improve = [];
+  if (!has.lcf) improve.push('LCF (m)');
+  if (!has.dis) improve.push('DIS(FW/SW)');
+  if (!has.lcb) improve.push('LCB (m)');
+  const parts = [];
+  if (missing.length) parts.push(`Eksik (gerekli): ${missing.join(', ')}`);
+  if (improve.length) parts.push(`Doğruluk artar: ${improve.join(', ')}`);
+  el.innerHTML = parts.join(' • ');
+}
+
+function renderEditableTable(containerId, rows, columns, onChange) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!rows || !rows.length) { el.innerHTML = '<div class="muted">Veri yok</div>'; return; }
+  const tbl = document.createElement('table');
+  tbl.className = 'pdf-table';
+  const trh = document.createElement('tr');
+  for (const c of columns) { const th = document.createElement('th'); th.textContent = c.label; trh.appendChild(th); }
+  tbl.appendChild(trh);
+  const fmt = (v)=> (v==null? '' : String(v));
+  for (let i=0; i<rows.length; i++) {
+    const r = rows[i];
+    const tr = document.createElement('tr');
+    for (const c of columns) {
+      const td = document.createElement('td');
+      td.contentEditable = 'true';
+      td.textContent = fmt(r[c.key]);
+      td.addEventListener('blur', ()=>{
+        const txt = td.textContent.trim();
+        const num = Number(txt);
+        r[c.key] = (c.type==='number' ? (isFinite(num)? num : NaN) : txt);
+        if (typeof onChange === 'function') onChange(i, c.key, r[c.key]);
+      });
+      tr.appendChild(td);
+    }
+    tbl.appendChild(tr);
+  }
+  el.innerHTML = '';
+  el.appendChild(tbl);
+}
+
+function updateProgramPreviews() {
+  const hydroCols = [
+    { key:'draft_m', label:'Draft (m)', type:'number' },
+    { key:'lcf_m', label:'LCF (m)', type:'number' },
+    { key:'tpc', label:'TPC (t/cm)', type:'number' },
+    { key:'mct', label:'MCT1cm (t·m/cm)', type:'number' },
+  ];
+  renderEditableTable('prog-hydro', (WIZ.hydro||[]), hydroCols, ()=>{});
+  const tankCols = [
+    { key:'name', label:'Tank', type:'text' },
+    { key:'lcg', label:'LCG (m)', type:'number' },
+    { key:'cap_m3', label:'Kapasite (m³)', type:'number' },
+  ];
+  renderEditableTable('prog-cargo', (WIZ.cargo||[]), tankCols, ()=>{});
+  renderEditableTable('prog-ballast', (WIZ.ballast||[]), tankCols, ()=>{});
+  const consCols = [
+    { key:'name', label:'Tank', type:'text' },
+    { key:'type', label:'Tür', type:'text' },
+    { key:'lcg', label:'LCG (m)', type:'number' },
+    { key:'cap_m3', label:'Kapasite (m³)', type:'number' },
+  ];
+  renderEditableTable('prog-cons', (WIZ.cons||[]), consCols, ()=>{});
+}
