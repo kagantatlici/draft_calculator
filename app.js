@@ -778,7 +778,16 @@ function parseTanksGeneric(text, mode) {
 function parseCsvSmart(text) {
   const lines = String(text||'').replace(/^\uFEFF/, '').split(/\r?\n/).filter(l=> l.trim().length>0);
   if (!lines.length) return { kind:'unknown' };
-  const delim = detectDelimiter(lines[0]);
+  // Robust delimiter guess: prefer comma, then tab, then semicolon, based on first non-empty lines
+  function guessDelim(ls){
+    const take = ls.slice(0, Math.min(5, ls.length));
+    const score = { ',':0, '\t':0, ';':0 };
+    for (const l of take){ if (!l) continue; score[','] += (l.split(',').length-1); score['\t'] += (l.split('\t').length-1); score[';'] += (l.split(';').length-1); }
+    const entries = Object.entries(score).sort((a,b)=> b[1]-a[1]);
+    if (entries[0][1] >= 2) return entries[0][0];
+    return detectDelimiter(ls[0]);
+  }
+  const delim = guessDelim(lines);
   const head = splitLine(lines[0], delim).map(h=> String(h||'').trim());
   const norm = s=> s.toLowerCase().replace(/[^a-z0-9]+/g,'');
   const cleanName = (n)=>{
