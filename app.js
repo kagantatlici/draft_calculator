@@ -776,11 +776,20 @@ function parseTanksGeneric(text, mode) {
 
 // CSV-aware tank/hydro parser: detects headers and routes rows to categories
 function parseCsvSmart(text) {
-  const lines = String(text||'').split(/\r?\n/).filter(l=> l.trim().length>0);
+  const lines = String(text||'').replace(/^\uFEFF/, '').split(/\r?\n/).filter(l=> l.trim().length>0);
   if (!lines.length) return { kind:'unknown' };
   const delim = detectDelimiter(lines[0]);
   const head = splitLine(lines[0], delim).map(h=> String(h||'').trim());
   const norm = s=> s.toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const cleanName = (n)=>{
+    let s = String(n||'').trim();
+    if (!s) return s;
+    // If commas/tabs/semicolons exist, keep only first token as tank name
+    if (s.includes(',')) s = s.split(',')[0].trim();
+    else if (s.includes('\t')) s = s.split('\t')[0].trim();
+    else if (s.includes(';')) s = s.split(';')[0].trim();
+    return s.replace(/^"|"$/g,'');
+  };
   const idx = {
     name: head.findIndex(h=> /^(tank|name)/i.test(h) || /tankname/i.test(norm(h)) || norm(h)==='name' ),
     vol: head.findIndex(h=> /(vol|volume|cap|capacity)/i.test(h) || /m3|m²|m³/.test(h) ),
@@ -830,7 +839,7 @@ function parseCsvSmart(text) {
     };
     for (let i=1;i<lines.length;i++){
       const cols = splitLine(lines[i], delim);
-      const name = String(cols[idx.name]||'').trim(); if (!name) continue;
+      const name = cleanName(cols[idx.name]); if (!name) continue;
       const lcg = toNumber(cols[idx.lcg]); if (!isFinite(lcg)) continue;
       const cap = idx.vol>=0? toNumber(cols[idx.vol]) : undefined;
       const entry = { name, lcg, cap_m3: isFinite(cap)? cap : undefined };
@@ -866,7 +875,7 @@ function parseCsvSmart(text) {
     for (let i=0;i<lines.length;i++){
       const cols = splitLine(lines[i], delim);
       if (cols.length < 3) continue;
-      const name = String(cols[0]||'').trim(); if (!name) continue;
+      const name = cleanName(cols[0]); if (!name) continue;
       const vol = toNumber(cols[1]);
       const lcg = toNumber(cols[cols.length-1]); if (!isFinite(lcg)) continue;
       const entry = { name, lcg, cap_m3: isFinite(vol)? vol : undefined };
