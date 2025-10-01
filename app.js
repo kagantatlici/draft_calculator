@@ -405,6 +405,7 @@ if (shipSel) {
 // Import wizard logic (basic paste-based parser)
 const addShipBtn = document.getElementById('add-ship');
 let WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
+let WIZ_LAST = { hydroText: '', cargoText: '', ballastText: '', consText: '' };
 let WIZ_BOUND = false;
 
 function showWizard() {
@@ -797,8 +798,9 @@ function bindWizardOnce() {
   });
   const mapHydBtn = document.getElementById('map-hydro-btn');
   if (mapHydBtn) mapHydBtn.addEventListener('click', ()=>{
-    const raw = document.getElementById('paste-hydro').value;
+    const raw = WIZ_LAST.hydroText || '';
     const lines = normText(raw).split(/\r?\n/).filter(l=>l.trim().length>0);
+    if (!lines.length) { alert('Önce dosyadan yükleyin.'); return; }
     buildMapUIHydro(lines, 'map-hydro');
   });
   const fileHydBtn = document.getElementById('upload-hydro');
@@ -808,7 +810,7 @@ function bindWizardOnce() {
     fileHyd.addEventListener('change', async ()=>{
       const f = fileHyd.files && fileHyd.files[0]; if (!f) return;
       const text = await readFileAsText(f);
-      document.getElementById('paste-hydro').value = text;
+      WIZ_LAST.hydroText = text;
       const rows = parseHydro(text);
       WIZ.hydro = rows;
       renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
@@ -817,9 +819,9 @@ function bindWizardOnce() {
   }
   const hydroClr = document.getElementById('clear-hydro');
   if (hydroClr) hydroClr.addEventListener('click', ()=>{
-    document.getElementById('paste-hydro').value='';
     document.getElementById('preview-hydro').innerHTML='';
     WIZ.hydro = [];
+    WIZ_LAST.hydroText = '';
     updateWizStatus();
   });
 
@@ -839,14 +841,15 @@ function bindWizardOnce() {
       updateWizStatus();
     });
     if (clr) clr.addEventListener('click', ()=>{
-      document.getElementById(`paste-${key}`).value='';
       document.getElementById(`preview-${key}`).innerHTML='';
       WIZ[key] = [];
+      WIZ_LAST[`${key}Text`] = '';
       updateWizStatus();
     });
     if (mapBtn) mapBtn.addEventListener('click', ()=>{
-      const raw = document.getElementById(`paste-${key}`).value;
+      const raw = WIZ_LAST[`${key}Text`] || '';
       const lines = normText(raw).split(/\r?\n/).filter(l=>l.trim().length>0);
+      if (!lines.length) { alert('Önce dosyadan yükleyin.'); return; }
       buildMapUITanks(lines, `map-${key}`, key==='cons'?'cons':'tank');
     });
     if (upBtn && fileIn) {
@@ -854,7 +857,7 @@ function bindWizardOnce() {
       fileIn.addEventListener('change', async ()=>{
         const f = fileIn.files && fileIn.files[0]; if (!f) return;
         const text = await readFileAsText(f);
-        document.getElementById(`paste-${key}`).value = text;
+        WIZ_LAST[`${key}Text`] = text;
         const rows = parseTanksGeneric(text, key==='cons'?'cons':'tank');
         const append = !!document.getElementById(`append-${key}`)?.checked;
         if (append) WIZ[key] = (WIZ[key] || []).concat(rows); else WIZ[key] = rows;
