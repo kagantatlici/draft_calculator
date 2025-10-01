@@ -894,6 +894,23 @@ function bindWizardOnce() {
   if (closeBtn) closeBtn.addEventListener('click', hideWizard);
   for (const b of getTabButtons()) b.addEventListener('click', () => activateTab(b.dataset.tab));
 
+  // Runtime hotfix: remove legacy per-tab upload/parse controls if present
+  (function sanitizeWizardUI(){
+    const removeByIds = [
+      'upload-hydro','file-hydro','parse-hydro',
+      'upload-cargo','file-cargo','parse-cargo',
+      'upload-ballast','file-ballast','parse-ballast',
+      'upload-cons','file-cons','parse-cons'
+    ];
+    for (const id of removeByIds){ const el = document.getElementById(id); if (el && el.parentElement) el.parentElement.removeChild(el); }
+    // Remove any stray buttons with text "Dosyadan Yükle" inside the wizard
+    const wizard = document.getElementById('wizard-modal') || document;
+    wizard.querySelectorAll('button').forEach(btn=>{ if ((btn.textContent||'').trim().toLowerCase()==='dosyadan yükle') btn.remove(); });
+    // Update Hydro info text if old text is still present
+    const hydroInfo = document.querySelector('#tab-hydro .info');
+    if (hydroInfo) hydroInfo.textContent = 'Lütfen hidrostatik veriyi TXT/CSV ile yükleyin. Gerekli sütunlar: Draft (m), TPC (t/cm), MCT1cm (t·m/cm). Önerilen: LCF (m), DIS(FW/SW), LCB (m).';
+  })();
+
   // PDF Import (embedded) inside wizard
   const openPdfBtn = document.getElementById('open-pdf-import');
   const pdfEmbed = document.getElementById('pdf-embed');
