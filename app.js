@@ -621,6 +621,12 @@ async function handleQuickFiles(fileList) {
     } catch (_) {}
   }
   // Update previews
+  // Deduplicate by (name|lcg|cap) to avoid duplicates on repeated imports
+  const keyTank = t=> `${t.name}|${t.lcg}|${t.cap_m3??''}`;
+  const dedupe = (arr)=>{ const m=new Map(); for(const x of arr||[]){ const k=keyTank(x); if(!m.has(k)) m.set(k,x);} return Array.from(m.values()); };
+  WIZ.cargo = dedupe(WIZ.cargo);
+  WIZ.ballast = dedupe(WIZ.ballast);
+  WIZ.cons = dedupe(WIZ.cons);
   renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
   renderTablePreview('preview-cargo', WIZ.cargo, ['name','lcg','cap_m3']);
   renderTablePreview('preview-ballast', WIZ.ballast, ['name','lcg','cap_m3']);
@@ -803,8 +809,8 @@ function parseCsvSmart(text) {
     // classifiers
     const any = (s, arr)=> arr.some(re=> re.test(s));
     const pat = {
-      cargo: [/(^|\b)(cot|cargo)\b/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
-      ballast: [/\b(wbt|wb|w\.b\.|wingballast)\b/i, /\bswbt\b/i, /\bbwbt\b/i, /\bdbt\b/i, /\bdoublebottom/i, /\bfpt\b|forepeaktank/i, /\bapt\b|afterpeaktank/i, /\bcwt\b/i, /\bballast\b/i],
+      cargo: [/(^|\b)(cot|cargo)(\b|\(|\d)/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
+      ballast: [/\b(wbt|wb|w\.b\.|wing\s*ballast)\b/i, /\bswbt\b/i, /\bbwbt\b/i, /\bdbt\b/i, /double\s*bottom/i, /\bfpt\b|fore\s*peak/i, /\bapt\b|after\s*peak/i, /\bcwt\b/i, /\bballast\b/i],
       fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b)/i, /potable/i],
       fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
       lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil/i, /hyd\.o|hydraulic/i, /lubric/i]
