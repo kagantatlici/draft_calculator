@@ -72,18 +72,27 @@ function interpHydro(rows, T) {
 
 function solveDraftByDisFW(rows, target_dis_fw) {
   if (!rows || rows.length === 0 || !isFinite(target_dis_fw)) return null;
-  // Monotonic in draft
-  if (typeof rows[0].dis_fw !== 'number') return null;
-  if (target_dis_fw <= rows[0].dis_fw) return rows[0].draft_m;
-  if (target_dis_fw >= rows[rows.length - 1].dis_fw) return rows[rows.length - 1].draft_m;
-  let lo = 0, hi = rows.length - 1;
+  // Use DIS(FW) if present; otherwise derive FW-equivalent from DIS(SW) using reference ρ
+  const rho_ref = (SHIP_ACTIVE && isFinite(SHIP_ACTIVE.RHO_REF)) ? SHIP_ACTIVE.RHO_REF : (SHIP.RHO_REF || 1.025);
+  const seq = [];
+  for (const r of rows) {
+    let y = (typeof r.dis_fw === 'number') ? r.dis_fw : undefined;
+    if (y == null && typeof r.dis_sw === 'number') y = r.dis_sw / rho_ref; // convert tons@SW to FW-equivalent (m³)
+    if (isFinite(r.draft_m) && isFinite(y)) seq.push({ T: r.draft_m, Y: y });
+  }
+  if (!seq.length) return null;
+  // Clamp to bounds
+  if (target_dis_fw <= seq[0].Y) return seq[0].T;
+  if (target_dis_fw >= seq[seq.length-1].Y) return seq[seq.length-1].T;
+  // Binary search on Y (assumed monotonic with T)
+  let lo = 0, hi = seq.length - 1;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
-    if (rows[mid].dis_fw <= target_dis_fw) lo = mid; else hi = mid;
+    if (seq[mid].Y <= target_dis_fw) lo = mid; else hi = mid;
   }
-  const a = rows[lo], b = rows[hi];
-  const t = (target_dis_fw - a.dis_fw) / (b.dis_fw - a.dis_fw);
-  return a.draft_m + (b.draft_m - a.draft_m) * t;
+  const a = seq[lo], b = seq[hi];
+  const t = (target_dis_fw - a.Y) / (b.Y - a.Y);
+  return a.T + (b.T - a.T) * t;
 }
 
 function el(id) { return document.getElementById(id); }
