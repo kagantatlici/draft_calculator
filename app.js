@@ -998,6 +998,32 @@ function renderTablePreview(elm, rows, cols) {
   const body = rows.slice(0,10).map(r=> `<tr>${cols.map(c=>`<td style=\"padding:4px;\">${r[c] ?? ''}</td>`).join('')}</tr>` ).join('');
   el.innerHTML = `<div style=\"font-size:12px;color:#9fb3c8;margin-bottom:6px;\">Toplam ${rows.length} satır</div><table style=\"width:100%;border-collapse:collapse;\">${head}${body}</table>`;
 }
+
+// Open a file chooser in a Safari-friendly way: create an ephemeral input that is
+// invisible but not display:none, then trigger click synchronously in user gesture.
+async function openFileDialogSafariSafe(multiple=true, accept='') {
+  return new Promise((resolve) => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.multiple = !!multiple;
+    if (accept) inp.accept = accept;
+    const style = inp.style;
+    style.position = 'fixed';
+    style.left = '-10000px';
+    style.top = '0';
+    style.width = '1px';
+    style.height = '1px';
+    style.opacity = '0';
+    style.pointerEvents = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const files = inp.files ? Array.from(inp.files) : [];
+      try { if (inp.parentNode) inp.parentNode.removeChild(inp); } catch(_) {}
+      resolve(files);
+    }, { once: true });
+    try { inp.click(); } catch(_) { resolve([]); }
+  });
+}
 function bindWizardOnce() {
   WIZ_BOUND = true;
   const closeBtn = document.getElementById('wizard-close');
@@ -1151,10 +1177,18 @@ function bindWizardOnce() {
       const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
       await handleQuickFiles(files);
     });
-    // Remove click-to-open to avoid double file dialogs; use the dedicated button instead
+    // Safari-friendly: allow click on dropzone to open chooser (uses ephemeral input)
+    dz.addEventListener('click', async ()=>{
+      const files = await openFileDialogSafariSafe(true, '.csv,.tsv,.txt');
+      await handleQuickFiles(files);
+    });
   }
   if (chooseAll && fileAll) {
-    chooseAll.addEventListener('click', ()=> fileAll.click());
+    // Use ephemeral input for Safari compatibility (hidden inputs with display:none may be ignored)
+    chooseAll.addEventListener('click', async ()=>{
+      const files = await openFileDialogSafariSafe(true, '.csv,.tsv,.txt');
+      await handleQuickFiles(files);
+    });
     fileAll.addEventListener('change', async ()=>{
       const files = fileAll.files ? Array.from(fileAll.files) : [];
       await handleQuickFiles(files);
