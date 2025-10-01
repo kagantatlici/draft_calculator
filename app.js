@@ -506,6 +506,25 @@ function cleanTankName(s) {
   else if (t.includes(';')) t = t.split(';')[0].trim();
   return t.replace(/^"|"$/g,'');
 }
+// Name classifier for Ballast-like tanks (accepts digits after tags like WBT1, SWBT2, etc.)
+function isBallastName(name) {
+  const raw = String(name||'');
+  const s = raw.toLowerCase();
+  const pats = [
+    /\bw\.?b\.?t(?=\b|\d)/i,         // WBT, W.B.T, WBT1
+    /\bswbt(?=\b|\d)/i,
+    /\bbwbt(?=\b|\d)/i,
+    /\bwb\s*(?:tk|tank)\b/i,
+    /\bwing\s*ballast\b/i,
+    /\bd\.?b\.?t(?=\b|\d)/i,         // DBT, D.B.T, DBT1
+    /double\s*bottom/i,
+    /\bfpt\b|fore\s*peak/i,
+    /\bapt\b|after\s*peak/i,
+    /\bcwt\b/i,
+    /\bballast\b/i,
+  ];
+  return pats.some(re => re.test(raw) || re.test(s));
+}
 function parseHydro(text) {
   const out = [];
   const rawLines = normText(text).split(/\r?\n/).filter(l=>l.trim().length>0);
@@ -660,6 +679,16 @@ async function handleQuickFiles(fileList) {
   WIZ.cargo = dedupe(WIZ.cargo);
   WIZ.ballast = dedupe(WIZ.ballast);
   WIZ.cons = dedupe(WIZ.cons);
+  // Post-fix reclassification: move ballast-like names mistakenly in Cons to Ballast
+  try {
+    const move = [];
+    const stay = [];
+    for (const t of WIZ.cons) { (isBallastName(t.name) ? move : stay).push(t); }
+    if (move.length) {
+      WIZ.cons = stay;
+      WIZ.ballast = dedupe((WIZ.ballast||[]).concat(move.map(({name,lcg,cap_m3})=>({name,lcg,cap_m3}))));
+    }
+  } catch(_) {}
   renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
   renderTablePreview('preview-cargo', WIZ.cargo, ['name','lcg','cap_m3']);
   renderTablePreview('preview-ballast', WIZ.ballast, ['name','lcg','cap_m3']);
@@ -918,12 +947,12 @@ function parseCsvSmart(text) {
     const pat = {
       cargo: [/(^|\b)(cot|cargo)(\b|\(|\d)/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
       ballast: [
-        /\bw\.?b\.?t\b/i,
+        /\bw\.?b\.?t(?=\b|\d)/i,
         /\bwb\s*(?:tk|tank)\b/i,
         /\bwing\s*ballast\b/i,
-        /\bswbt\b/i,
-        /\bbwbt\b/i,
-        /\bd\.?b\.?t\b/i,
+        /\bswbt(?=\b|\d)/i,
+        /\bbwbt(?=\b|\d)/i,
+        /\bd\.?b\.?t(?=\b|\d)/i,
         /double\s*bottom/i,
         /\bfpt\b|fore\s*peak/i,
         /\bapt\b|after\s*peak/i,
