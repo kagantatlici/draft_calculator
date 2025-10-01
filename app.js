@@ -488,6 +488,15 @@ function splitLine(line, delim) {
   if (delim==='whitespace') return line.trim().split(/\s+/);
   return line.split(delim);
 }
+// Normalize tank name from CSV: keep only first token (strip trailing ,cap and ,lcg tokens)
+function cleanTankName(s) {
+  let t = String(s||'').trim();
+  if (!t) return t;
+  if (t.includes(',')) t = t.split(',')[0].trim();
+  else if (t.includes('\t')) t = t.split('\t')[0].trim();
+  else if (t.includes(';')) t = t.split(';')[0].trim();
+  return t.replace(/^"|"$/g,'');
+}
 function parseHydro(text) {
   const out = [];
   const rawLines = normText(text).split(/\r?\n/).filter(l=>l.trim().length>0);
@@ -505,13 +514,24 @@ function parseHydro(text) {
   const map = { draft:-1, dis_fw:-1, dis_sw:-1, lcf:-1, lcb:-1, tpc:-1, mct:-1 };
   headerNorm.forEach((hn, i) => {
     if (map.draft < 0 && /draft/.test(hn)) map.draft = i;
-    if (map.dis_fw < 0 && /(disfw|\bfw$)/.test(hn)) map.dis_fw = i;
-    if (map.dis_sw < 0 && /(dissw|\bsw$)/.test(hn)) map.dis_sw = i;
+    // DIS synonyms: displ, displt, disp, dis, displacement (+ optional fw/sw tags)
+    const hasDis = /(displacement|displ|displt|disp|^dis$)/.test(hn) || /^dis[a-z]*$/.test(hn);
+    const isFW = /(fw|fresh)/.test(hn);
+    const isSW = /(sw|sea)/.test(hn);
+    if (map.dis_fw < 0 && (/(disfw|\bfw$)/.test(hn) || (hasDis && isFW))) map.dis_fw = i;
+    if (map.dis_sw < 0 && (/(dissw|\bsw$)/.test(hn) || (hasDis && isSW))) map.dis_sw = i;
     if (map.lcf < 0 && /lcf/.test(hn)) map.lcf = i;
     if (map.lcb < 0 && /lcb/.test(hn)) map.lcb = i;
     if (map.tpc < 0 && /tpc/.test(hn)) map.tpc = i;
     if (map.mct < 0 && /mct/.test(hn)) map.mct = i;
   });
+  // If generic DIS column exists without FW/SW suffix, prefer it for DIS(FW)
+  if (map.dis_fw < 0) {
+    for (let i = 0; i < headerNorm.length; i++) {
+      const hn = headerNorm[i];
+      if (/(displacement|displ|displt|disp|^dis$)/.test(hn)) { map.dis_fw = i; break; }
+    }
+  }
   // Fallback: tolerate dotted/space-separated kısaltmalar even if normalization fails
   if (map.mct < 0) {
     for (let i = 0; i < headerRaw.length; i++) {
@@ -579,7 +599,11 @@ async function handleQuickFiles(fileList) {
         const parsed = parseCsvSmart(text);
         if (parsed.kind === 'hydro') {
           const rows = parsed.rows || [];
-          if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+          if (rows.length) {
+            WIZ.hydro = (WIZ.hydro||[]).concat(rows);
+            WIZ_LAST.hydroText = text;
+            added.hydro += rows.length;
+          }
         } else if (parsed.kind === 'tanks') {
           const { cargo, ballast, cons } = parsed;
           if (cargo.length) { WIZ.cargo = (WIZ.cargo||[]).concat(cargo); added.cargo += cargo.length; }
@@ -590,7 +614,7 @@ async function handleQuickFiles(fileList) {
           const kind = classifyTextForSection(text);
           if (kind === 'hydro') {
             const rows = parseHydro(text);
-            if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+            if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); WIZ_LAST.hydroText = text; added.hydro += rows.length; }
           } else if (kind === 'cargo') {
             const rows = parseTanksGeneric(text, 'tank');
             if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
@@ -606,7 +630,7 @@ async function handleQuickFiles(fileList) {
         const kind = classifyTextForSection(text);
         if (kind === 'hydro') {
           const rows = parseHydro(text);
-          if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+          if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); WIZ_LAST.hydroText = text; added.hydro += rows.length; }
         } else if (kind === 'cargo') {
           const rows = parseTanksGeneric(text, 'tank');
           if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
@@ -683,6 +707,7 @@ function buildMapUIHydro(lines, containerId) {
     }
     const append = !!document.getElementById('append-hydro')?.checked;
     if (append) WIZ.hydro = WIZ.hydro.concat(rows); else WIZ.hydro = rows;
+    try { WIZ_LAST.hydroText = lines.join('\n'); } catch(_) {}
     renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
@@ -720,7 +745,7 @@ function buildMapUITanks(lines, containerId, mode) {
     for (const line of lines) {
       const cols = splitLine(line, delim);
       const pick = i => (i==null?undefined: cols[i]);
-      const name = pick(m.name) || cols.join(' ');
+      const name = cleanTankName(pick(m.name) || cols.join(' '));
       const lcg = toNumber(pick(m.lcg)); if (!isFinite(lcg)) continue;
       const cap = toNumber(pick(m.cap));
       let type = (m.type!=null? (pick(m.type)||'') : '');
@@ -790,15 +815,6 @@ function parseCsvSmart(text) {
   const delim = guessDelim(lines);
   const head = splitLine(lines[0], delim).map(h=> String(h||'').trim());
   const norm = s=> s.toLowerCase().replace(/[^a-z0-9]+/g,'');
-  const cleanName = (n)=>{
-    let s = String(n||'').trim();
-    if (!s) return s;
-    // If commas/tabs/semicolons exist, keep only first token as tank name
-    if (s.includes(',')) s = s.split(',')[0].trim();
-    else if (s.includes('\t')) s = s.split('\t')[0].trim();
-    else if (s.includes(';')) s = s.split(';')[0].trim();
-    return s.replace(/^"|"$/g,'');
-  };
   const idx = {
     name: head.findIndex(h=> /^(tank|name)/i.test(h) || /tankname/i.test(norm(h)) || norm(h)==='name' ),
     vol: head.findIndex(h=> /(vol|volume|cap|capacity)/i.test(h) || /m3|m²|m³/.test(h) ),
@@ -807,9 +823,23 @@ function parseCsvSmart(text) {
     tpc: head.findIndex(h=> /tpc/i.test(h)),
     mct: head.findIndex(h=> /(mct|mtc)/i.test(h)),
     lcf: head.findIndex(h=> /lcf/i.test(h)),
-    disfw: head.findIndex(h=> /(dis\.?\(fw\)|disfw)/i.test(h)),
-    dissw: head.findIndex(h=> /(dis\.?\(sw\)|dissw)/i.test(h)),
+    disfw: -1,
+    dissw: -1,
   };
+  // DIS synonyms on CSV headers
+  const headNorm = head.map(h => norm(h));
+  for (let i=0;i<headNorm.length;i++){
+    const hn = headNorm[i];
+    const hasDis = /(displacement|displ|displt|disp|^dis$)/.test(hn) || /^dis[a-z]*$/.test(hn);
+    const isFW = /(fw|fresh)/.test(hn);
+    const isSW = /(sw|sea)/.test(hn);
+    if (idx.disfw < 0 && (/(dis\(fw\)|disfw)/.test(hn) || (hasDis && isFW))) idx.disfw = i;
+    if (idx.dissw < 0 && (/(dis\(sw\)|dissw)/.test(hn) || (hasDis && isSW))) idx.dissw = i;
+  }
+  if (idx.disfw < 0) {
+    const i = headNorm.findIndex(hn => /(displacement|displ|displt|disp|^dis$)/.test(hn));
+    if (i>=0) idx.disfw = i;
+  }
   const hasHydro = idx.draft>=0 && (idx.tpc>=0 || idx.mct>=0);
   if (hasHydro) {
     const rows=[];
@@ -828,7 +858,20 @@ function parseCsvSmart(text) {
     const any = (s, arr)=> arr.some(re=> re.test(s));
     const pat = {
       cargo: [/(^|\b)(cot|cargo)(\b|\(|\d)/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
-      ballast: [/\b(wbt|wb|w\.b\.|wing\s*ballast)\b/i, /\bswbt\b/i, /\bbwbt\b/i, /\bdbt\b/i, /double\s*bottom/i, /\bfpt\b|fore\s*peak/i, /\bapt\b|after\s*peak/i, /\bcwt\b/i, /\bballast\b/i],
+      // Ballast patterns expanded
+      ballast: [
+        /\bw\.?b\.?t\b/i,                // W.B.T or WBT
+        /\bwb\s*(?:tk|tank)\b/i,         // WB TK or WB TANK
+        /\bwing\s*ballast\b/i,
+        /\bswbt\b/i,
+        /\bbwbt\b/i,
+        /\bd\.?b\.?t\b/i,                // D.B.T
+        /double\s*bottom/i,
+        /\bfpt\b|fore\s*peak/i,
+        /\bapt\b|after\s*peak/i,
+        /\bcwt\b/i,
+        /\bballast\b/i
+      ],
       fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b)/i, /potable/i],
       fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
       lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil/i, /hyd\.o|hydraulic/i, /lubric/i]
@@ -842,13 +885,12 @@ function parseCsvSmart(text) {
       if (any(raw, pat.fw) || any(s, pat.fw)) return { cat:'cons', type:'freshwater' };
       if (any(raw, pat.lube) || any(s, pat.lube)) return { cat:'cons', type:'lube' };
       if (any(raw, pat.fuel) || any(s, pat.fuel)) return { cat:'cons', type:'fuel' };
-      // fallbacks
-      if (/water|tank/i.test(raw)) return { cat:'ballast' };
+      // fallback: all others → Consumables
       return { cat:'cons', type:'fuel' };
     };
     for (let i=1;i<lines.length;i++){
       const cols = splitLine(lines[i], delim);
-      const name = cleanName(cols[idx.name]); if (!name) continue;
+      const name = cleanTankName(cols[idx.name]); if (!name) continue;
       const lcg = toNumber(cols[idx.lcg]); if (!isFinite(lcg)) continue;
       const cap = idx.vol>=0? toNumber(cols[idx.vol]) : undefined;
       const entry = { name, lcg, cap_m3: isFinite(cap)? cap : undefined };
@@ -866,7 +908,19 @@ function parseCsvSmart(text) {
     const any = (s, arr)=> arr.some(re=> re.test(s));
     const pat = {
       cargo: [/(^|\b)(cot|cargo)(\b|\(|\d)/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
-      ballast: [/\b(wbt|wb|w\.b\.|wing\s*ballast)\b/i, /\bswbt\b/i, /\bbwbt\b/i, /\bdbt\b/i, /double\s*bottom/i, /\bfpt\b|fore\s*peak/i, /\bapt\b|after\s*peak/i, /\bcwt\b/i, /\bballast\b/i],
+      ballast: [
+        /\bw\.?b\.?t\b/i,
+        /\bwb\s*(?:tk|tank)\b/i,
+        /\bwing\s*ballast\b/i,
+        /\bswbt\b/i,
+        /\bbwbt\b/i,
+        /\bd\.?b\.?t\b/i,
+        /double\s*bottom/i,
+        /\bfpt\b|fore\s*peak/i,
+        /\bapt\b|after\s*peak/i,
+        /\bcwt\b/i,
+        /\bballast\b/i
+      ],
       fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/i],
       fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
       lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil|hyd\.o|hydraulic|lubric/i]
@@ -878,13 +932,13 @@ function parseCsvSmart(text) {
       if (any(raw, pat.fw) || any(s, pat.fw)) return { cat:'cons', type:'freshwater' };
       if (any(raw, pat.lube) || any(s, pat.lube)) return { cat:'cons', type:'lube' };
       if (any(raw, pat.fuel) || any(s, pat.fuel)) return { cat:'cons', type:'fuel' };
-      if (/water|tank/i.test(raw)) return { cat:'ballast' };
+      // fallback: all others → Consumables
       return { cat:'cons', type:'fuel' };
     };
     for (let i=0;i<lines.length;i++){
       const cols = splitLine(lines[i], delim);
       if (cols.length < 3) continue;
-      const name = cleanName(cols[0]); if (!name) continue;
+      const name = cleanTankName(cols[0]); if (!name) continue;
       const vol = toNumber(cols[1]);
       const lcg = toNumber(cols[cols.length-1]); if (!isFinite(lcg)) continue;
       const entry = { name, lcg, cap_m3: isFinite(vol)? vol : undefined };
