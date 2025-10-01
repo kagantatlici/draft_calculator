@@ -443,6 +443,8 @@ function updateWizStatus() {
     `Cons: ${WIZ.cons.length}`,
   ].join(' • ');
   s.textContent = counts;
+  updateRequirementHints();
+  updateProgramPreviews();
 }
 if (addShipBtn) addShipBtn.addEventListener('click', showWizard);
 

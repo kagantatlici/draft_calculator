@@ -58,3 +58,9 @@ button:hover { filter: brightness(1.05); }
 .notes ul { margin: 8px 0 0 16px; }
 
 small { color: var(--muted); }
+
+/* Editable tables used in wizard previews */
+.pdf-table { border-collapse: collapse; width: 100%; table-layout: auto; }
+.pdf-table th, .pdf-table td { border:1px solid var(--border); padding:4px 6px; font-size:12px; }
+.pdf-table td[contenteditable="true"] { background: #0f1014; outline: none; }
+.pdf-table td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px #4aa3ff55; }

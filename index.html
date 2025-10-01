@@ -7,15 +7,7 @@
     <link rel="icon" href="./tiny.png" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="styles-import.css" />
-    <!-- PDF.js core (pinned) -->
-    <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-    <script>pdfjsLib.GlobalWorkerOptions.workerSrc="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
-    <!-- pdf-lib (pinned) -->
-    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-    <!-- Tesseract.js (pinned major) -->
-    <script src="https://unpkg.com/tesseract.js@v5.1.1/dist/tesseract.min.js"></script>
-    <!-- OpenCV.js (pinned) -->
-    <script src="https://docs.opencv.org/4.10.0/opencv.js"></script>
+    <!-- OCR-related libraries removed for now (performance and simplicity) -->
   </head>
   <body>
     <header>
@@ -106,7 +98,6 @@
 
     <script src="constants.js"></script>
     <script src="app.js"></script>
-    <script type="module" src="./scripts/import/pdf-ui.js?v=lp3"></script>
     
     <!-- Import Wizard Modal -->
     <div id="wizard-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;">
@@ -121,11 +112,17 @@
             <label>Gemi Adı<input id="wiz-name" type="text" placeholder="Örn. MAGNI ALEXA" /></label>
             <label>Gemi ID<input id="wiz-id" type="text" placeholder="örn. magni_alexa" /></label>
           </div>
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <button id="open-pdf-import" class="secondary">PDF’ten İçe Aktar (OCR)</button>
-            <span class="info" style="font-size:12px;">Zor dosyalar için Bulut OCR kullanılır (HF Space).</span>
+          <div class="info" style="font-size:12px; color:#9fb3c8;">PDF/OCR geçici olarak devre dışı. Lütfen verileri TXT/CSV olarak yapıştırın veya yükleyin.</div>
+          <div id="req-box" class="card" style="background:#0f172a; border:1px solid #1e293b;">
+            <div style="font-weight:600; margin-bottom:6px;">Gerekli ve Önerilen Bilgiler</div>
+            <ul style="margin:6px 0 0 18px; color:#cbd5e1; font-size:13px;">
+              <li>Gerekli (Hydrostatic): <b>Draft (m)</b>, <b>TPC (t/cm)</b>, <b>MCT1cm (t·m/cm)</b></li>
+              <li>Önerilen (Hydrostatic → doğruluk artar): <b>LCF (m)</b>, <b>DIS(FW)/DIS(SW)</b>, <b>LCB (m)</b></li>
+              <li>Gerekli (COT/Other Tanks): <b>Tank adı</b>, <b>LCG (m)</b> (opsiyonel: <b>kapasite m³</b>)</li>
+              <li>Consumables (opsiyonel): <b>FO/DO, FW, LO</b> tankları için LCG ve tercihen kapasite</li>
+            </ul>
+            <div id="wiz-lints" style="margin-top:8px; font-size:12px; color:#93c5fd;"></div>
           </div>
-          <div id="pdf-embed" style="display:none; border:1px solid #1e293b; border-radius:6px; padding:8px;"></div>
           <!-- Quick multi-file import -->
           <div id="quick-import" style="border:1px dashed #334155; padding:10px; border-radius:8px; background:#0b1222;">
             <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Hızlı İçe Aktarma: Hydro + Tank dosyalarını (CSV/TSV/TXT) tek seferde buraya bırakın. Otomatik sınıflandırılır ve ilgili sekmelere eklenir.</div>
@@ -222,11 +219,31 @@
               <button id="wiz-activate">Kaydet ve Etkinleştir</button>
             </div>
           </div>
+
+          <!-- Program Görünümü (Düzenlenebilir) -->
+          <div class="card" style="margin-top:8px;">
+            <div style="font-weight:600; margin-bottom:6px;">Program Görünümü (Düzenlenebilir)</div>
+            <div style="display:grid; gap:10px; grid-template-columns: 1fr;">
+              <div>
+                <div class="muted">Hydrostatic Table (Draft, LCF, TPC, MCT1cm)</div>
+                <div id="prog-hydro"></div>
+              </div>
+              <div>
+                <div class="muted">COT (Cargo) – Volumes & LCG</div>
+                <div id="prog-cargo"></div>
+              </div>
+              <div>
+                <div class="muted">Other Tanks (Ballast) – Volumes & LCG</div>
+                <div id="prog-ballast"></div>
+              </div>
+              <div>
+                <div class="muted">Consumables – Volumes & LCG</div>
+                <div id="prog-cons"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-
-    <!-- PDF Import Wizard Modal (mounted by scripts/import/pdf-ui.js) -->
-    <div id="pdf-import-overlay" aria-hidden="true" role="dialog" aria-modal="true" style="display:none"></div>
   </body>
 </html>
