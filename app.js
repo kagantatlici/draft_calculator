@@ -737,9 +737,9 @@ function parseTanksGeneric(text, mode) {
   const lines = normText(text).split(/\r?\n/);
   const typeFromName = (name) => {
     const s = name.toLowerCase();
-    if (/hfo|f\.o|fuel|d\.o|mdo|mgo|diesel|bunker/.test(s)) return 'fuel';
-    if (/fresh|fw\b|freshwater/.test(s)) return 'freshwater';
-    if (/lube|lub\.? oil|lo\b/.test(s)) return 'lube';
+    if (/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/.test(s) || /(serv|sett|slud|drain|over)/.test(s)) return 'fuel';
+    if (/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/.test(s)) return 'freshwater';
+    if (/(^|\b)(lo|l\.o\.|lube)(\b|\.)/.test(s) || /cyl\.o|cyl\.?oil|hyd\.o|hydraulic|lubric/.test(s)) return 'lube';
     return 'fuel';
   };
   for (const raw of lines) {
@@ -797,22 +797,38 @@ function parseCsvSmart(text) {
   // Tanks CSV
   if (idx.name>=0 && idx.lcg>=0) {
     const cargo=[], ballast=[], cons=[];
+    // classifiers
+    const any = (s, arr)=> arr.some(re=> re.test(s));
+    const pat = {
+      cargo: [/(^|\b)(cot|cargo)\b/i, /slop/i, /residual/i, /(sloptk|sloptank)/i],
+      ballast: [/\b(wbt|wb|w\.b\.|wingballast)\b/i, /\bswbt\b/i, /\bbwbt\b/i, /\bdbt\b/i, /\bdoublebottom/i, /\bfpt\b|forepeaktank/i, /\bapt\b|afterpeaktank/i, /\bcwt\b/i, /\bballast\b/i],
+      fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b)/i, /potable/i],
+      fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
+      lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil/i, /hyd\.o|hydraulic/i, /lubric/i]
+    };
+    const classifyTank = (name)=>{
+      const raw = String(name||'');
+      const s = raw.toLowerCase();
+      if (any(raw, pat.cargo) || any(s, pat.cargo)) return { cat:'cargo' };
+      if (any(raw, pat.ballast) || any(s, pat.ballast)) return { cat:'ballast' };
+      // consumables typing
+      if (any(raw, pat.fw) || any(s, pat.fw)) return { cat:'cons', type:'freshwater' };
+      if (any(raw, pat.lube) || any(s, pat.lube)) return { cat:'cons', type:'lube' };
+      if (any(raw, pat.fuel) || any(s, pat.fuel)) return { cat:'cons', type:'fuel' };
+      // fallbacks
+      if (/water|tank/i.test(raw)) return { cat:'ballast' };
+      return { cat:'cons', type:'fuel' };
+    };
     for (let i=1;i<lines.length;i++){
       const cols = splitLine(lines[i], delim);
       const name = String(cols[idx.name]||'').trim(); if (!name) continue;
       const lcg = toNumber(cols[idx.lcg]); if (!isFinite(lcg)) continue;
       const cap = idx.vol>=0? toNumber(cols[idx.vol]) : undefined;
       const entry = { name, lcg, cap_m3: isFinite(cap)? cap : undefined };
-      const lower = name.toLowerCase();
-      if (/(cot|slop|residual)/.test(lower)) cargo.push(entry);
-      else if (/(wbt|swbt|bwbt|fpt|apt|cwt)/.test(lower)) ballast.push(entry);
-      else {
-        // classify consumables type
-        let type='fuel';
-        if (/(fresh|f\.w|fw\b|freshwater)/.test(lower)) type='freshwater';
-        else if (/(l\.?o\.|lube|cyl\.o|hyd\.o|l\.o\.)/.test(lower)) type='lube';
-        cons.push({ ...entry, type });
-      }
+      const cls = classifyTank(name);
+      if (cls.cat==='cargo') cargo.push(entry);
+      else if (cls.cat==='ballast') ballast.push(entry);
+      else cons.push({ ...entry, type: cls.type||'fuel' });
     }
     return { kind:'tanks', cargo, ballast, cons };
   }
