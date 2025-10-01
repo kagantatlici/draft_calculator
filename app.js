@@ -571,19 +571,49 @@ async function handleQuickFiles(fileList) {
   for (const f of fileList) {
     try {
       const text = await readFileAsText(f);
-      const kind = classifyTextForSection(text);
-      if (kind === 'hydro') {
-        const rows = parseHydro(text);
-        if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
-      } else if (kind === 'cargo') {
-        const rows = parseTanksGeneric(text, 'tank');
-        if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
-      } else if (kind === 'ballast') {
-        const rows = parseTanksGeneric(text, 'tank');
-        if (rows.length) { WIZ.ballast = (WIZ.ballast||[]).concat(rows); added.ballast += rows.length; }
-      } else if (kind === 'cons') {
-        const rows = parseTanksGeneric(text, 'cons');
-        if (rows.length) { WIZ.cons = (WIZ.cons||[]).concat(rows); added.cons += rows.length; }
+      const isCSV = /\.(csv|tsv)$/i.test(f.name || '') || /^\s*(tank|name|draft|vol|volume|lcg)/i.test(text);
+      if (isCSV) {
+        const parsed = parseCsvSmart(text);
+        if (parsed.kind === 'hydro') {
+          const rows = parsed.rows || [];
+          if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+        } else if (parsed.kind === 'tanks') {
+          const { cargo, ballast, cons } = parsed;
+          if (cargo.length) { WIZ.cargo = (WIZ.cargo||[]).concat(cargo); added.cargo += cargo.length; }
+          if (ballast.length) { WIZ.ballast = (WIZ.ballast||[]).concat(ballast); added.ballast += ballast.length; }
+          if (cons.length) { WIZ.cons = (WIZ.cons||[]).concat(cons); added.cons += cons.length; }
+        } else {
+          // fallback classify
+          const kind = classifyTextForSection(text);
+          if (kind === 'hydro') {
+            const rows = parseHydro(text);
+            if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+          } else if (kind === 'cargo') {
+            const rows = parseTanksGeneric(text, 'tank');
+            if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
+          } else if (kind === 'ballast') {
+            const rows = parseTanksGeneric(text, 'tank');
+            if (rows.length) { WIZ.ballast = (WIZ.ballast||[]).concat(rows); added.ballast += rows.length; }
+          } else if (kind === 'cons') {
+            const rows = parseTanksGeneric(text, 'cons');
+            if (rows.length) { WIZ.cons = (WIZ.cons||[]).concat(rows); added.cons += rows.length; }
+          }
+        }
+      } else {
+        const kind = classifyTextForSection(text);
+        if (kind === 'hydro') {
+          const rows = parseHydro(text);
+          if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); added.hydro += rows.length; }
+        } else if (kind === 'cargo') {
+          const rows = parseTanksGeneric(text, 'tank');
+          if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
+        } else if (kind === 'ballast') {
+          const rows = parseTanksGeneric(text, 'tank');
+          if (rows.length) { WIZ.ballast = (WIZ.ballast||[]).concat(rows); added.ballast += rows.length; }
+        } else if (kind === 'cons') {
+          const rows = parseTanksGeneric(text, 'cons');
+          if (rows.length) { WIZ.cons = (WIZ.cons||[]).concat(rows); added.cons += rows.length; }
+        }
       }
     } catch (_) {}
   }
@@ -722,9 +752,7 @@ function parseTanksGeneric(text, mode) {
       lcg = nums[nums.length-1];
       // if there is a second to last and it's much bigger, treat as cap
       if (nums.length>=2 && Math.abs(nums[nums.length-2])>50) cap = nums[nums.length-2];
-      // cut name before numbers start
-      const idx = l.search(/[-+]?\d/);
-      if (idx>0) name = l.slice(0, idx).trim();
+      // For free-form lines we keep full name to preserve labels like "NO.1 COT(P)"
     }
     if (!isFinite(lcg)) continue;
     if (mode==='cons') {
@@ -735,6 +763,60 @@ function parseTanksGeneric(text, mode) {
     }
   }
   return out;
+}
+
+// CSV-aware tank/hydro parser: detects headers and routes rows to categories
+function parseCsvSmart(text) {
+  const lines = String(text||'').split(/\r?\n/).filter(l=> l.trim().length>0);
+  if (!lines.length) return { kind:'unknown' };
+  const delim = detectDelimiter(lines[0]);
+  const head = splitLine(lines[0], delim).map(h=> String(h||'').trim());
+  const norm = s=> s.toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const idx = {
+    name: head.findIndex(h=> /^(tank|name)/i.test(h) || /tankname/i.test(norm(h)) || norm(h)==='name' ),
+    vol: head.findIndex(h=> /(vol|volume|cap|capacity)/i.test(h) || /m3|m²|m³/.test(h) ),
+    lcg: head.findIndex(h=> /lcg/i.test(h)),
+    draft: head.findIndex(h=> /draft/i.test(h)),
+    tpc: head.findIndex(h=> /tpc/i.test(h)),
+    mct: head.findIndex(h=> /(mct|mtc)/i.test(h)),
+    lcf: head.findIndex(h=> /lcf/i.test(h)),
+    disfw: head.findIndex(h=> /(dis\.?\(fw\)|disfw)/i.test(h)),
+    dissw: head.findIndex(h=> /(dis\.?\(sw\)|dissw)/i.test(h)),
+  };
+  const hasHydro = idx.draft>=0 && (idx.tpc>=0 || idx.mct>=0);
+  if (hasHydro) {
+    const rows=[];
+    for (let i=1;i<lines.length;i++){
+      const cols = splitLine(lines[i], delim);
+      const val = (j)=> j>=0? toNumber(cols[j]??'') : undefined;
+      const draft = val(idx.draft); if (!isFinite(draft)) continue;
+      rows.push({ draft_m: draft, lcf_m: val(idx.lcf), tpc: val(idx.tpc), mct: val(idx.mct), dis_fw: val(idx.disfw), dis_sw: val(idx.dissw) });
+    }
+    return { kind:'hydro', rows };
+  }
+  // Tanks CSV
+  if (idx.name>=0 && idx.lcg>=0) {
+    const cargo=[], ballast=[], cons=[];
+    for (let i=1;i<lines.length;i++){
+      const cols = splitLine(lines[i], delim);
+      const name = String(cols[idx.name]||'').trim(); if (!name) continue;
+      const lcg = toNumber(cols[idx.lcg]); if (!isFinite(lcg)) continue;
+      const cap = idx.vol>=0? toNumber(cols[idx.vol]) : undefined;
+      const entry = { name, lcg, cap_m3: isFinite(cap)? cap : undefined };
+      const lower = name.toLowerCase();
+      if (/(cot|slop|residual)/.test(lower)) cargo.push(entry);
+      else if (/(wbt|swbt|bwbt|fpt|apt|cwt)/.test(lower)) ballast.push(entry);
+      else {
+        // classify consumables type
+        let type='fuel';
+        if (/(fresh|f\.w|fw\b|freshwater)/.test(lower)) type='freshwater';
+        else if (/(l\.?o\.|lube|cyl\.o|hyd\.o|l\.o\.)/.test(lower)) type='lube';
+        cons.push({ ...entry, type });
+      }
+    }
+    return { kind:'tanks', cargo, ballast, cons };
+  }
+  return { kind:'unknown' };
 }
 
 function renderTablePreview(elm, rows, cols) {
@@ -881,7 +963,7 @@ function bindWizardOnce() {
       const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
       await handleQuickFiles(files);
     });
-    dz.addEventListener('click', ()=> fileAll && fileAll.click());
+    // Remove click-to-open to avoid double file dialogs; use the dedicated button instead
   }
   if (chooseAll && fileAll) {
     chooseAll.addEventListener('click', ()=> fileAll.click());
