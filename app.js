@@ -416,6 +416,7 @@ const addShipBtn = document.getElementById('add-ship');
 let WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
 let WIZ_LAST = { hydroText: '', cargoText: '', ballastText: '', consText: '' };
 let WIZ_BOUND = false;
+let OPEN_BUSY = false; // prevent multi-open race (Chrome double listeners, etc.)
 
 function showWizard() {
   const ov = document.getElementById('wizard-overlay');
@@ -1167,16 +1168,28 @@ function bindWizardOnce() {
   const chooseAll = document.getElementById('choose-all');
   const fileAll = document.getElementById('file-all');
   if (chooseAll && fileAll) {
-    // Use ephemeral input for cross-browser compatibility
-    chooseAll.addEventListener('click', async ()=>{
-      const files = await openFileDialogSafariSafe(true, '.csv,.tsv,.txt');
-      await handleQuickFiles(files);
-    });
-    fileAll.addEventListener('change', async ()=>{
-      const files = fileAll.files ? Array.from(fileAll.files) : [];
-      await handleQuickFiles(files);
-      fileAll.value = '';
-    });
+    // Bind once: guard against accidental multiple bindings
+    if (!chooseAll.dataset.bound) {
+      chooseAll.addEventListener('click', async (ev)=>{
+        if (OPEN_BUSY) return; OPEN_BUSY = true;
+        try {
+          const files = await openFileDialogSafariSafe(true, '.csv,.tsv,.txt');
+          await handleQuickFiles(files);
+        } finally {
+          // small delay to avoid immediate re-entrancy in Chrome
+          setTimeout(()=>{ OPEN_BUSY = false; }, 0);
+        }
+      });
+      chooseAll.dataset.bound = '1';
+    }
+    if (!fileAll.dataset.boundChange) {
+      fileAll.addEventListener('change', async ()=>{
+        const files = fileAll.files ? Array.from(fileAll.files) : [];
+        await handleQuickFiles(files);
+        fileAll.value = '';
+      });
+      fileAll.dataset.boundChange = '1';
+    }
   }
 }
 
