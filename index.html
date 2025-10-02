@@ -97,7 +97,7 @@
     </footer>
 
     <script src="constants.js"></script>
-    <script src="app.js?v=lp16"></script>
+    <script src="app.js?v=lp17"></script>
     
     <!-- Import Wizard Modal -->
     <div id="wizard-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;">
@@ -123,10 +123,9 @@
             </ul>
             <div id="wiz-lints" style="margin-top:8px; font-size:12px; color:#93c5fd;"></div>
           </div>
-          <!-- Quick multi-file import -->
+          <!-- Quick multi-file import (button only) -->
           <div id="quick-import" style="border:1px dashed #334155; padding:10px; border-radius:8px; background:#0b1222;">
-            <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Hızlı İçe Aktarma: Hydro + Tank dosyalarını (CSV/TSV/TXT) tek seferde buraya bırakın. Otomatik sınıflandırılır ve ilgili sekmelere eklenir.</div>
-            <div id="dropzone-all" style="padding:14px; text-align:center; color:#94a3b8; background:#0f172a; border:1px dashed #475569; border-radius:6px; cursor:pointer;">Dosyaları buraya bırakın veya tıklayıp seçin</div>
+            <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Hızlı İçe Aktarma: Hydro + Tank dosyalarını (CSV/TSV/TXT) “Dosyaları Seç” ile yükleyin. Otomatik sınıflandırılır ve ilgili sekmelere eklenir.</div>
             <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
               <button id="choose-all" class="secondary">Dosyaları Seç</button>
               <input id="file-all" type="file" multiple accept=".csv,.tsv,.txt" style="display:none;" />

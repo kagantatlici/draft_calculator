@@ -1164,27 +1164,10 @@ function bindWizardOnce() {
   }
 
   // Quick multi-file dropzone
-  const dz = document.getElementById('dropzone-all');
   const chooseAll = document.getElementById('choose-all');
   const fileAll = document.getElementById('file-all');
-  if (dz) {
-    const over = (e)=>{ e.preventDefault(); e.stopPropagation(); dz.style.borderColor = '#60a5fa'; };
-    const leave = (e)=>{ e.preventDefault(); e.stopPropagation(); dz.style.borderColor = '#475569'; };
-    dz.addEventListener('dragover', over);
-    dz.addEventListener('dragleave', leave);
-    dz.addEventListener('drop', async (e)=>{
-      e.preventDefault(); e.stopPropagation(); dz.style.borderColor = '#475569';
-      const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
-      await handleQuickFiles(files);
-    });
-    // Safari-friendly: allow click on dropzone to open chooser (uses ephemeral input)
-    dz.addEventListener('click', async ()=>{
-      const files = await openFileDialogSafariSafe(true, '.csv,.tsv,.txt');
-      await handleQuickFiles(files);
-    });
-  }
   if (chooseAll && fileAll) {
-    // Use ephemeral input for Safari compatibility (hidden inputs with display:none may be ignored)
+    // Use ephemeral input for cross-browser compatibility
     chooseAll.addEventListener('click', async ()=>{
       const files = await openFileDialogSafariSafe(true, '.csv,.tsv,.txt');
       await handleQuickFiles(files);
