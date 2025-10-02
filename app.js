@@ -534,7 +534,7 @@ function parseHydro(text) {
   // Find a likely header line by normalized keywords (handles dotted forms like L.C.F.)
   let headerIdx = rawLines.findIndex(l => {
     const ln = normalizeKey(l);
-    return /(draft|dis|disp|displ|dissw|lcf|lcb|tpc|mct)/.test(ln);
+    return /(draft|dis|disp|displ|dissw|lcf|lca|lcb|tpc|mct)/.test(ln);
   });
   if (headerIdx < 0) headerIdx = 0;
   const delim = detectDelimiter(rawLines[headerIdx]);
@@ -549,7 +549,7 @@ function parseHydro(text) {
     const isFW = /(fw|fresh)/.test(hn);
     const isSW = /(sw|sea)/.test(hn);
     if (map.dis_sw < 0 && (/(dissw|\bsw$)/.test(hn) || (hasDis && isSW) || (hasDis && !isFW && !isSW))) map.dis_sw = i; // generic → SW by default
-    if (map.lcf < 0 && /lcf/.test(hn)) map.lcf = i;
+    if (map.lcf < 0 && /(lcf|lca)/.test(hn)) map.lcf = i; // accept LCA as LCF
     if (map.lcb < 0 && /lcb/.test(hn)) map.lcb = i;
     if (map.tpc < 0 && /tpc/.test(hn)) map.tpc = i;
     if (map.mct < 0 && /mct/.test(hn)) map.mct = i;
@@ -609,7 +609,15 @@ async function handleQuickFiles(fileList) {
     if (el) el.textContent = msg;
   };
   log(`İşleniyor: ${fileList.length} dosya...`);
-  let added = { hydro:0, cargo:0, ballast:0, cons:0 };
+  // Snapshot counts BEFORE import to compute accurate deltas after reclassification
+  const countNow = () => ({
+    hydro: (WIZ.hydro||[]).length,
+    cargo: (WIZ.cargo||[]).length,
+    ballast: (WIZ.ballast||[]).length,
+    cons: (WIZ.cons||[]).length,
+  });
+  const before = countNow();
+  let added = { hydro:0, cargo:0, ballast:0, cons:0 }; // legacy accumulation (kept for potential debugging)
   for (const f of fileList) {
     try {
       const text = await readFileAsText(f);
@@ -683,12 +691,20 @@ async function handleQuickFiles(fileList) {
       WIZ.ballast = dedupe((WIZ.ballast||[]).concat(move.map(({name,lcg,cap_m3})=>({name,lcg,cap_m3}))));
     }
   } catch(_) {}
-  renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
+  renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m',{key:'dis_sw',label:'Displacement'},'lcf_m','lcb_m','tpc','mct']);
   renderTablePreview('preview-cargo', WIZ.cargo, ['name','lcg','cap_m3']);
   renderTablePreview('preview-ballast', WIZ.ballast, ['name','lcg','cap_m3']);
   renderTablePreview('preview-cons', WIZ.cons, ['name','type','lcg','cap_m3']);
   updateWizStatus();
-  log(`Eklendi → Hydro:${added.hydro} Cargo:${added.cargo} Ballast:${added.ballast} Cons:${added.cons}`);
+  // Compute AFTER counts and show net deltas so they match the status panel
+  const after = countNow();
+  const delta = {
+    hydro: Math.max(0, after.hydro - before.hydro),
+    cargo: Math.max(0, after.cargo - before.cargo),
+    ballast: Math.max(0, after.ballast - before.ballast),
+    cons: Math.max(0, after.cons - before.cons),
+  };
+  log(`Eklendi → Hydro:${delta.hydro} Cargo:${delta.cargo} Ballast:${delta.ballast} Cons:${delta.cons}`);
 }
 function buildMapUIHydro(lines, containerId) {
   const el = document.getElementById(containerId);
@@ -738,7 +754,7 @@ function buildMapUIHydro(lines, containerId) {
     // Always append + dedupe by draft
     WIZ.hydro = dedupeHydro((WIZ.hydro||[]).concat(rows));
     try { WIZ_LAST.hydroText = lines.join('\n'); } catch(_) {}
-    renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
+    renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m',{key:'dis_sw',label:'Displacement'},'lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
 }
@@ -851,7 +867,8 @@ function parseCsvSmart(text) {
     draft: head.findIndex(h=> /draft/i.test(h)),
     tpc: head.findIndex(h=> /tpc/i.test(h)),
     mct: head.findIndex(h=> /(mct|mtc)/i.test(h)),
-    lcf: head.findIndex(h=> /lcf/i.test(h)),
+    lcf: head.findIndex(h=> /(lcf|lca)/i.test(h)), // treat LCA as LCF
+    lcb: head.findIndex(h=> /lcb/i.test(h)),
     dissw: -1,
   };
   // DIS synonyms on CSV headers
@@ -871,7 +888,7 @@ function parseCsvSmart(text) {
       const cols = splitLine(lines[i], delim);
       const val = (j)=> j>=0? toNumber(cols[j]??'') : undefined;
       const draft = val(idx.draft); if (!isFinite(draft)) continue;
-      rows.push({ draft_m: draft, lcf_m: val(idx.lcf), tpc: val(idx.tpc), mct: val(idx.mct), dis_sw: val(idx.dissw) });
+      rows.push({ draft_m: draft, lcf_m: val(idx.lcf), lcb_m: val(idx.lcb), tpc: val(idx.tpc), mct: val(idx.mct), dis_sw: val(idx.dissw) });
     }
     return { kind:'hydro', rows };
   }
@@ -980,9 +997,25 @@ function renderTablePreview(elm, rows, cols) {
   const el = document.getElementById(elm);
   if (!el) return;
   if (!rows || !rows.length) { el.innerHTML = '<div style="color:#94a3b8;">Veri yok</div>'; return; }
-  const head = `<tr>${cols.map(c=>`<th style=\"text-align:left;padding:4px;\">${c}</th>`).join('')}</tr>`;
-  const body = rows.slice(0,10).map(r=> `<tr>${cols.map(c=>`<td style=\"padding:4px;\">${r[c] ?? ''}</td>`).join('')}</tr>` ).join('');
+  const defs = cols.map(c => (typeof c === 'string') ? { key: c, label: c } : { key: c.key, label: c.label || c.key });
+  const head = `<tr>${defs.map(d=>`<th style=\"text-align:left;padding:4px;\">${d.label}</th>`).join('')}</tr>`;
+  const body = rows.slice(0,10).map(r=> `<tr>${defs.map(d=>`<td style=\"padding:4px;\">${r[d.key] ?? ''}</td>`).join('')}</tr>` ).join('');
   el.innerHTML = `<div style=\"font-size:12px;color:#9fb3c8;margin-bottom:6px;\">Toplam ${rows.length} satır</div><table style=\"width:100%;border-collapse:collapse;\">${head}${body}</table>`;
+}
+
+// Dedupe hydro rows by draft; keep row with more numeric fields
+function dedupeHydro(arr){
+  const score = (r)=> ['dis_sw','lcf_m','lcb_m','tpc','mct'].reduce((s,k)=> s + (isFinite(r?.[k])?1:0), 0);
+  const key = (r)=> isFinite(r?.draft_m) ? (Math.round(r.draft_m*1000)/1000).toFixed(3) : '';
+  const map = new Map();
+  for (const r of (arr||[])){
+    if (!isFinite(r?.draft_m)) continue;
+    const k = key(r);
+    if (!map.has(k)) { map.set(k, r); continue; }
+    const old = map.get(k);
+    map.set(k, (score(r) > score(old)) ? r : old);
+  }
+  return Array.from(map.values()).sort((a,b)=> a.draft_m - b.draft_m);
 }
 
 // Open a file chooser in a Safari-friendly way: create an ephemeral input that is
@@ -1075,7 +1108,7 @@ function bindWizardOnce() {
     const txt = document.getElementById('paste-hydro').value;
     const rows = parseHydro(txt);
     WIZ.hydro = rows;
-    renderTablePreview('preview-hydro', rows, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
+    renderTablePreview('preview-hydro', rows, ['draft_m',{key:'dis_sw',label:'Displacement'},'lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
   const mapHydBtn = document.getElementById('map-hydro-btn');
@@ -1095,7 +1128,7 @@ function bindWizardOnce() {
       WIZ_LAST.hydroText = text;
       const rows = parseHydro(text);
       WIZ.hydro = rows;
-      renderTablePreview('preview-hydro', rows, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
+      renderTablePreview('preview-hydro', rows, ['draft_m',{key:'dis_sw',label:'Displacement'},'lcf_m','lcb_m','tpc','mct']);
       updateWizStatus();
     });
   }
