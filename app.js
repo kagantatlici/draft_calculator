@@ -534,33 +534,27 @@ function parseHydro(text) {
   // Find a likely header line by normalized keywords (handles dotted forms like L.C.F.)
   let headerIdx = rawLines.findIndex(l => {
     const ln = normalizeKey(l);
-    return /(draft|disfw|dissw|lcf|lcb|tpc|mct)/.test(ln);
+    return /(draft|dis|disp|displ|dissw|lcf|lcb|tpc|mct)/.test(ln);
   });
   if (headerIdx < 0) headerIdx = 0;
   const delim = detectDelimiter(rawLines[headerIdx]);
   const headerRaw = splitLine(rawLines[headerIdx], delim);
   const headerNorm = headerRaw.map(h => normalizeKey(h));
-  const map = { draft:-1, dis_fw:-1, dis_sw:-1, lcf:-1, lcb:-1, tpc:-1, mct:-1 };
+  // Single displacement: only SW-based; generic names default to SW
+  const map = { draft:-1, dis_sw:-1, lcf:-1, lcb:-1, tpc:-1, mct:-1 };
   headerNorm.forEach((hn, i) => {
     if (map.draft < 0 && /draft/.test(hn)) map.draft = i;
     // DIS synonyms: displ, displt, disp, dis, displacement (+ optional fw/sw tags)
     const hasDis = /(displacement|displ|displt|disp|^dis$)/.test(hn) || /^dis[a-z]*$/.test(hn);
     const isFW = /(fw|fresh)/.test(hn);
     const isSW = /(sw|sea)/.test(hn);
-    if (map.dis_fw < 0 && (/(disfw|\bfw$)/.test(hn) || (hasDis && isFW))) map.dis_fw = i;
-    if (map.dis_sw < 0 && (/(dissw|\bsw$)/.test(hn) || (hasDis && isSW))) map.dis_sw = i;
+    if (map.dis_sw < 0 && (/(dissw|\bsw$)/.test(hn) || (hasDis && isSW) || (hasDis && !isFW && !isSW))) map.dis_sw = i; // generic → SW by default
     if (map.lcf < 0 && /lcf/.test(hn)) map.lcf = i;
     if (map.lcb < 0 && /lcb/.test(hn)) map.lcb = i;
     if (map.tpc < 0 && /tpc/.test(hn)) map.tpc = i;
     if (map.mct < 0 && /mct/.test(hn)) map.mct = i;
   });
-  // If generic DIS column exists without FW/SW suffix, prefer it for DIS(FW)
-  if (map.dis_fw < 0) {
-    for (let i = 0; i < headerNorm.length; i++) {
-      const hn = headerNorm[i];
-      if (/(displacement|displ|displt|disp|^dis$)/.test(hn)) { map.dis_fw = i; break; }
-    }
-  }
+  // Generic already routed to SW above
   // Fallback: tolerate dotted/space-separated kısaltmalar even if normalization fails
   if (map.mct < 0) {
     for (let i = 0; i < headerRaw.length; i++) {
@@ -573,13 +567,12 @@ function parseHydro(text) {
     const get = (idx) => (idx >= 0 && idx < cols.length) ? cols[idx] : '';
     const draft = toNumber(get(map.draft >= 0 ? map.draft : 0));
     if (!isFinite(draft)) continue;
-    const dis_fw = isFinite(toNumber(get(map.dis_fw))) ? toNumber(get(map.dis_fw)) : undefined;
     const dis_sw = isFinite(toNumber(get(map.dis_sw))) ? toNumber(get(map.dis_sw)) : undefined;
     const lcf = toNumber(get(map.lcf));
     const lcb = toNumber(get(map.lcb));
     const tpc = toNumber(get(map.tpc));
     const mct = toNumber(get(map.mct));
-    out.push({ draft_m: draft, dis_fw, dis_sw, lcf_m: lcf, lcb_m: lcb, tpc, mct });
+    out.push({ draft_m: draft, dis_sw, lcf_m: lcf, lcb_m: lcb, tpc, mct });
   }
   return out;
 }
@@ -690,7 +683,7 @@ async function handleQuickFiles(fileList) {
       WIZ.ballast = dedupe((WIZ.ballast||[]).concat(move.map(({name,lcg,cap_m3})=>({name,lcg,cap_m3}))));
     }
   } catch(_) {}
-  renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+  renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
   renderTablePreview('preview-cargo', WIZ.cargo, ['name','lcg','cap_m3']);
   renderTablePreview('preview-ballast', WIZ.ballast, ['name','lcg','cap_m3']);
   renderTablePreview('preview-cons', WIZ.cons, ['name','type','lcg','cap_m3']);
@@ -713,8 +706,7 @@ function buildMapUIHydro(lines, containerId) {
       <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Kolon Eşleme (örnek satırdaki kolonlara göre)</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px;">
         ${sel('map-h-draft','Draft (m)')}
-        ${sel('map-h-disfw','DIS(FW) (t)')}
-        ${sel('map-h-dissw','DIS(SW) (t)')}
+        ${sel('map-h-dis','DIS (t) [SW varsayılan]')}
         ${sel('map-h-lcf','LCF (m)')}
         ${sel('map-h-lcb','LCB (m)')}
         ${sel('map-h-tpc','TPC (t/cm)')}
@@ -727,7 +719,7 @@ function buildMapUIHydro(lines, containerId) {
   const apply = document.getElementById('apply-map-hydro');
   if (apply) apply.addEventListener('click', ()=>{
     const idx = k=>{ const v = document.getElementById(`map-h-${k}`).value; return v===''?null:Number(v); };
-    const map = { draft: idx('draft'), dis_fw: idx('disfw'), dis_sw: idx('dissw'), lcf: idx('lcf'), lcb: idx('lcb'), tpc: idx('tpc'), mct: idx('mct') };
+    const map = { draft: idx('draft'), dis_sw: idx('dis'), lcf: idx('lcf'), lcb: idx('lcb'), tpc: idx('tpc'), mct: idx('mct') };
     const rows=[];
     for (const line of lines) {
       const cols = splitLine(line, delim);
@@ -736,7 +728,6 @@ function buildMapUIHydro(lines, containerId) {
       if (!isFinite(draft)) continue;
       rows.push({
         draft_m: draft,
-        dis_fw: val(map.dis_fw),
         dis_sw: val(map.dis_sw),
         lcf_m: val(map.lcf),
         lcb_m: val(map.lcb),
@@ -744,10 +735,10 @@ function buildMapUIHydro(lines, containerId) {
         mct: val(map.mct),
       });
     }
-    const append = !!document.getElementById('append-hydro')?.checked;
-    if (append) WIZ.hydro = WIZ.hydro.concat(rows); else WIZ.hydro = rows;
+    // Always append + dedupe by draft
+    WIZ.hydro = dedupeHydro((WIZ.hydro||[]).concat(rows));
     try { WIZ_LAST.hydroText = lines.join('\n'); } catch(_) {}
-    renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+    renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
 }
@@ -799,8 +790,7 @@ function buildMapUITanks(lines, containerId, mode) {
       if (mode==='cons') rows.push({ name, type, lcg, cap_m3: isFinite(cap)? cap : undefined });
       else rows.push({ name, lcg, cap_m3: isFinite(cap)? cap : undefined });
     }
-    const append = !!document.getElementById(`append-${mode==='cons'?'cons':'cargo'}`)?.checked; // caller will pass correct container
-    // We won't rely on id above; caller will handle assignment
+    // Caller will handle assignment to WIZ lists if needed
     // Return rows by emitting a custom event
   });
 }
@@ -862,7 +852,6 @@ function parseCsvSmart(text) {
     tpc: head.findIndex(h=> /tpc/i.test(h)),
     mct: head.findIndex(h=> /(mct|mtc)/i.test(h)),
     lcf: head.findIndex(h=> /lcf/i.test(h)),
-    disfw: -1,
     dissw: -1,
   };
   // DIS synonyms on CSV headers
@@ -872,13 +861,9 @@ function parseCsvSmart(text) {
     const hasDis = /(displacement|displ|displt|disp|^dis$)/.test(hn) || /^dis[a-z]*$/.test(hn);
     const isFW = /(fw|fresh)/.test(hn);
     const isSW = /(sw|sea)/.test(hn);
-    if (idx.disfw < 0 && (/(dis\(fw\)|disfw)/.test(hn) || (hasDis && isFW))) idx.disfw = i;
-    if (idx.dissw < 0 && (/(dis\(sw\)|dissw)/.test(hn) || (hasDis && isSW))) idx.dissw = i;
+    if (idx.dissw < 0 && (/(dis\(sw\)|dissw)/.test(hn) || (hasDis && isSW) || (hasDis && !isFW && !isSW))) idx.dissw = i; // generic → SW
   }
-  if (idx.disfw < 0) {
-    const i = headNorm.findIndex(hn => /(displacement|displ|displt|disp|^dis$)/.test(hn));
-    if (i>=0) idx.disfw = i;
-  }
+  // generic now routed to SW
   const hasHydro = idx.draft>=0 && (idx.tpc>=0 || idx.mct>=0);
   if (hasHydro) {
     const rows=[];
@@ -886,7 +871,7 @@ function parseCsvSmart(text) {
       const cols = splitLine(lines[i], delim);
       const val = (j)=> j>=0? toNumber(cols[j]??'') : undefined;
       const draft = val(idx.draft); if (!isFinite(draft)) continue;
-      rows.push({ draft_m: draft, lcf_m: val(idx.lcf), tpc: val(idx.tpc), mct: val(idx.mct), dis_fw: val(idx.disfw), dis_sw: val(idx.dissw) });
+      rows.push({ draft_m: draft, lcf_m: val(idx.lcf), tpc: val(idx.tpc), mct: val(idx.mct), dis_sw: val(idx.dissw) });
     }
     return { kind:'hydro', rows };
   }
@@ -1090,7 +1075,7 @@ function bindWizardOnce() {
     const txt = document.getElementById('paste-hydro').value;
     const rows = parseHydro(txt);
     WIZ.hydro = rows;
-    renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+    renderTablePreview('preview-hydro', rows, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
     updateWizStatus();
   });
   const mapHydBtn = document.getElementById('map-hydro-btn');
@@ -1110,7 +1095,7 @@ function bindWizardOnce() {
       WIZ_LAST.hydroText = text;
       const rows = parseHydro(text);
       WIZ.hydro = rows;
-      renderTablePreview('preview-hydro', rows, ['draft_m','dis_fw','dis_sw','lcf_m','lcb_m','tpc','mct']);
+      renderTablePreview('preview-hydro', rows, ['draft_m','dis_sw','lcf_m','lcb_m','tpc','mct']);
       updateWizStatus();
     });
   }
@@ -1131,10 +1116,10 @@ function bindWizardOnce() {
     if (btn) btn.addEventListener('click', ()=>{
       const txt = document.getElementById(`paste-${key}`).value;
       const rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
-      const append = !!document.getElementById(`append-${key}`)?.checked;
-      if (append) WIZ[key] = (WIZ[key] || []).concat(rows); else WIZ[key] = rows;
+      // Always append; no 'mevcutlara ekle' checkbox
+      WIZ[key] = (WIZ[key] || []).concat(rows);
       const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
-      renderTablePreview(`preview-${key}`, rows, cols);
+      renderTablePreview(`preview-${key}`, WIZ[key], cols);
       updateWizStatus();
     });
     if (clr) clr.addEventListener('click', ()=>{
@@ -1156,10 +1141,10 @@ function bindWizardOnce() {
         const text = await readFileAsText(f);
         WIZ_LAST[`${key}Text`] = text;
         const rows = parseTanksGeneric(text, key==='cons'?'cons':'tank');
-        const append = !!document.getElementById(`append-${key}`)?.checked;
-        if (append) WIZ[key] = (WIZ[key] || []).concat(rows); else WIZ[key] = rows;
+        // Always append
+        WIZ[key] = (WIZ[key] || []).concat(rows);
         const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
-        renderTablePreview(`preview-${key}`, rows, cols);
+        renderTablePreview(`preview-${key}`, WIZ[key], cols);
         updateWizStatus();
       });
   }
@@ -1241,7 +1226,6 @@ function buildShipJsonFromWizard() {
   const cons = WIZ.cons.map(t=>({ name:t.name, type:t.type, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const hydro = WIZ.hydro.map(r=>({
     draft_m: r.draft_m,
-    dis_fw: r.dis_fw,
     dis_sw: r.dis_sw,
     lcf_m: r.lcf_m,
     lcb_m: r.lcb_m,
@@ -1306,7 +1290,7 @@ function updateRequirementHints() {
     if (isFinite(r?.tpc)) has.tpc = true;
     if (isFinite(r?.mct)) has.mct = true;
     if (isFinite(r?.lcf_m)) has.lcf = true;
-    if (isFinite(r?.dis_fw) || isFinite(r?.dis_sw)) has.dis = true;
+    if (isFinite(r?.dis_sw)) has.dis = true;
     if (isFinite(r?.lcb_m)) has.lcb = true;
   }
   const missing = [];
@@ -1315,7 +1299,7 @@ function updateRequirementHints() {
   if (!has.mct) missing.push('MCT1cm (t·m/cm)');
   const improve = [];
   if (!has.lcf) improve.push('LCF (m)');
-  if (!has.dis) improve.push('DIS(FW/SW)');
+  if (!has.dis) improve.push('DIS (t) [SW]');
   if (!has.lcb) improve.push('LCB (m)');
   const parts = [];
   if (missing.length) parts.push(`Eksik (gerekli): ${missing.join(', ')}`);

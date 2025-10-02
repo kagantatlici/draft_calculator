@@ -117,7 +117,7 @@
             <div style="font-weight:600; margin-bottom:6px;">Gerekli ve Önerilen Bilgiler</div>
             <ul style="margin:6px 0 0 18px; color:#cbd5e1; font-size:13px;">
               <li>Gerekli (Hydrostatic): <b>Draft (m)</b>, <b>TPC (t/cm)</b>, <b>MCT1cm (t·m/cm)</b></li>
-              <li>Önerilen (Hydrostatic → doğruluk artar): <b>LCF (m)</b>, <b>DIS(FW)/DIS(SW)</b>, <b>LCB (m)</b></li>
+              <li>Önerilen (Hydrostatic → doğruluk artar): <b>LCF (m)</b>, <b>DIS (t) [SW]</b>, <b>LCB (m)</b></li>
               <li>Gerekli (COT/Other Tanks): <b>Tank adı</b>, <b>LCG (m)</b> (opsiyonel: <b>kapasite m³</b>)</li>
               <li>Consumables (opsiyonel): <b>FO/DO, FW, LO</b> tankları için LCG ve tercihen kapasite</li>
             </ul>
@@ -144,9 +144,6 @@
               Lütfen hidrostatik veriyi TXT/CSV ile yükleyin. Gerekli sütunlar: Draft (m), TPC (t/cm), MCT1cm (t·m/cm). Önerilen: LCF (m), DIS(FW/SW), LCB (m).
             </div>
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#9fb3c8;">
-                <input id="append-hydro" type="checkbox" /> Mevcutlara ekle
-              </label>
               <button id="map-hydro-btn" class="secondary">Kolon Eşleme</button>
               <button id="clear-hydro" class="secondary">Temizle</button>
             </div>
@@ -158,9 +155,6 @@
               Bu alana cargo tank LCG listesi girilir. Gerekli alanlar: Tank adı, LCG (m). Kapasite (HACİM 100%) opsiyoneldir. Sounding tablosu DEĞİL; %100 hacim ve LCG gerekir.
             </div>
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#9fb3c8;">
-                <input id="append-cargo" type="checkbox" /> Mevcutlara ekle
-              </label>
               <button id="map-cargo-btn" class="secondary">Kolon Eşleme</button>
               <button id="clear-cargo" class="secondary">Temizle</button>
             </div>
@@ -172,9 +166,6 @@
               Bu alana ballast tank LCG listesi girilir. Gerekli alanlar: Tank adı, LCG (m). Kapasite opsiyonel.
             </div>
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#9fb3c8;">
-                <input id="append-ballast" type="checkbox" /> Mevcutlara ekle
-              </label>
               <button id="map-ballast-btn" class="secondary">Kolon Eşleme</button>
               <button id="clear-ballast" class="secondary">Temizle</button>
             </div>
@@ -186,9 +177,6 @@
               Consumables (FO/DO, FW, LO) bilgisi gereklidir: Tank adı, tür (fuel|freshwater|lube), LCG (m). Kapasite m³ varsa ekleyin.
             </div>
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#9fb3c8;">
-                <input id="append-cons" type="checkbox" /> Mevcutlara ekle
-              </label>
               <button id="map-cons-btn" class="secondary">Kolon Eşleme</button>
               <button id="clear-cons" class="secondary">Temizle</button>
             </div>
