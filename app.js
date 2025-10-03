@@ -601,6 +601,7 @@ function populateShipDropdown(ships) {
   const sel = document.getElementById('ship-select');
   if (!sel) return;
   sel.innerHTML = '';
+  const ph = document.createElement('option'); ph.value = ''; ph.textContent = 'gemi seç'; sel.appendChild(ph);
   for (const s of ships) {
     const opt = document.createElement('option');
     opt.value = s.id; opt.textContent = s.name;
@@ -666,6 +667,40 @@ const impFile = document.getElementById('import-file');
 if (impBtn && impFile) {
   impBtn.addEventListener('click', ()=> impFile.click());
   impFile.addEventListener('change', async ()=>{ const f=impFile.files&&impFile.files[0]; if (f) await importAllLocalShips(f); impFile.value=''; });
+}
+
+// Delete ship (local-only)
+function removeLocalShip(id) {
+  try { localStorage.removeItem(LS_PREFIX + id); } catch(_) {}
+  const idx = getLocalIndex().filter(s => s.id !== id);
+  setLocalIndex(idx);
+  const active = getActiveShipID();
+  if (active === id) { try { localStorage.removeItem(LS_ACTIVE_KEY); } catch(_) {} }
+}
+async function showPlaceholders() {
+  const make = (n, prefix) => Array.from({length:n}).map((_,i)=>({ id: `${prefix}${i+1}`, name: `${prefix.toUpperCase()} ${i+1}`, lcg: 0, cap_m3: null }));
+  ACTIVE = { cargo: make(6,'COT'), ballast: make(6,'Ballast') };
+  HYDRO_ROWS = null;
+  CONS_TANKS = await loadConsumablesFromJson();
+  buildTankInputs('cargo-tanks', ACTIVE.cargo);
+  buildTankInputs('ballast-tanks', ACTIVE.ballast);
+  renderConstants();
+  wireConsumablesUI();
+}
+const delBtn = document.getElementById('delete-ship');
+if (delBtn && shipSel) {
+  delBtn.addEventListener('click', async ()=>{
+    const id = shipSel.value;
+    if (!id) { alert('Select a ship first.'); return; }
+    if (!getLocalShip(id)) { alert('Only locally saved/imported ships can be deleted.'); return; }
+    if (!confirm(`Delete ship "${id}" from local storage?`)) return;
+    removeLocalShip(id);
+    // Refresh dropdown
+    SHIPS_INDEX = await compileShipsIndex();
+    populateShipDropdown(SHIPS_INDEX);
+    shipSel.value = '';
+    await showPlaceholders();
+  });
 }
 // Import wizard logic (basic paste-based parser)
 const addShipBtn = document.getElementById('add-ship');
