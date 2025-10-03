@@ -35,9 +35,13 @@ function getActiveShipID() { try { return localStorage.getItem(LS_ACTIVE_KEY) ||
 
 function convertLongitudinalToMidship(x, lbp, ref) {
   if (!isFinite(x)) return x;
-  if (!isFinite(lbp) || lbp <= 0) return x;
   const r = String(ref||'').toLowerCase();
-  if (r === 'ap_plus') return x - lbp/2;
+  // Midship-based inputs
+  if (r === 'ms_plus') return x;         // midship (+ forward) → already in program convention
+  if (r === 'ms_minus') return -x;       // midship (− forward) → flip sign to (+ forward)
+  // AP/FP-based inputs need LBP
+  if (!isFinite(lbp) || lbp <= 0) return x;
+  if (r === 'ap_plus') return x - lbp/2; // AP (+ forward) → shift origin to midship
   // FP (− aft): values measured from FP, aft is negative.
   // Convert: x_mid = x_fp + lbp/2
   if (r === 'fp_minus') return x + lbp/2;
@@ -48,7 +52,8 @@ function convertProfileLongitudes(profile) {
   try {
     const lbp = Number(profile.ship && profile.ship.lbp);
     const ref = profile.ship && profile.ship.long_ref;
-    if (!isFinite(lbp) || !(ref==='ap_plus' || ref==='fp_minus')) return profile;
+    // Proceed if any ref provided. AP/FP need LBP; midship refs handled without LBP.
+    if (!ref) return profile;
     // Convert hydro rows
     if (profile.hydrostatics && Array.isArray(profile.hydrostatics.rows)) {
       for (const r of profile.hydrostatics.rows) {
