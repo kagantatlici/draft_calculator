@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tanker Draft & Trim Hesaplayıcı</title>
+    <title>Tanker Draft & Trim Calculator</title>
     <link rel="icon" href="./tiny.png" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="styles-import.css" />
@@ -11,105 +11,100 @@
   </head>
   <body>
     <header>
-      <h1>Draft & Trim (Tanker) – Basit Hesaplayıcı</h1>
+      <h1>Tanker Draft & Trim Calculator</h1>
       <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <label style="display:flex; align-items:center; gap:6px;">
-          <span>Gemi:</span>
+          <span>Ship:</span>
           <select id="ship-select"></select>
         </label>
-        <button id="add-ship" class="secondary">Gemi Ekle</button>
+        <button id="add-ship" class="secondary">Add Ship</button>
+        <button id="export-ships" class="secondary">Export Ships</button>
+        <button id="import-ships" class="secondary">Import Ships</button>
+        <input id="import-file" type="file" accept="application/json" style="display:none;" />
       </div>
     </header>
 
     <main>
       <section class="card">
-        <h2>Genel Girdiler</h2>
+        <h2>General Inputs</h2>
         <div class="grid">
           <label>
-            Deniz suyu yoğunluğu ρ (t/m³)
+            Seawater density ρ (t/m³)
             <input id="rho" type="number" step="0.001" value="1.025" />
           </label>
         </div>
-        <div class="grid" id="consumables-group" style="margin-top:8px; grid-template-columns: 1fr; gap:8px;">
-          <div class="muted">Consumables Girdileri (FW, FO, Others)</div>
-          <div class="muted" id="cap-cons-total">Toplam Consumables Kapasite: -</div>
-          <div class="cons-row" data-kind="fw">
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <b style="min-width:60px;">FW</b>
-              <span class="cap-label" id="cap-fw">Toplam Kap: -</span>
-              <label>Ağırlık (t)<input id="fw_w" type="number" step="0.1" placeholder="mt" /></label>
-            </div>
+        <div id="consumables-group" class="cons-inline" style="margin-top:8px;">
+          <div class="cons-item" data-kind="fw">
+            <b>FW</b>
+            <span class="cap-label" id="cap-fw">Cap: -</span>
+            <label>Weight (t)<input id="fw_w" type="number" step="0.1" placeholder="t" /></label>
           </div>
-          <div class="cons-row" data-kind="fo">
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <b style="min-width:60px;">FO</b>
-              <span class="cap-label" id="cap-fo">Toplam Kap: -</span>
-              <label>Ağırlık (t)<input id="fo_w" type="number" step="0.1" placeholder="mt" /></label>
-            </div>
+          <div class="cons-item" data-kind="fo">
+            <b>FO</b>
+            <span class="cap-label" id="cap-fo">Cap: -</span>
+            <label>Weight (t)<input id="fo_w" type="number" step="0.1" placeholder="t" /></label>
           </div>
-          <div class="cons-row" data-kind="oth">
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <b style="min-width:60px;">Others</b>
-              <span class="cap-label" id="cap-oth">Toplam Kap: -</span>
-              <label>Ağırlık (t)<input id="oth_w" type="number" step="0.1" placeholder="mt" /></label>
-            </div>
+          <div class="cons-item" data-kind="oth">
+            <b>Others</b>
+            <span class="cap-label" id="cap-oth">Cap: -</span>
+            <label>Weight (t)<input id="oth_w" type="number" step="0.1" placeholder="t" /></label>
           </div>
-          <div class="muted" id="cons-tweight" style="font-size:12px;">Total Consumables Weight: - t</div>
+          <div class="muted" id="cons-tweight" style="font-size:12px; margin-left:10px;">Total Consumables Weight: - t</div>
         </div>
         
       </section>
 
       <div class="tank-columns">
         <section class="card">
-          <h2>Yük Tankları (mt)</h2>
+          <h2>Cargo Tanks (t)</h2>
           <div id="cargo-tanks" class="tank-list"></div>
-          <div id="cargo-total" class="muted" style="margin-top:6px; font-size:12px;">Toplam Hacim: - m³ • Toplam Ağırlık: - t</div>
+          <div id="cargo-total" class="muted" style="margin-top:6px; font-size:12px;">Total Volume: - m³ • Total Weight: - t</div>
         </section>
 
         <section class="card">
-          <h2>Balast Tankları (mt)</h2>
+          <h2>Ballast Tanks (t)</h2>
           <div id="ballast-tanks" class="tank-list"></div>
-          <div id="ballast-total" class="muted" style="margin-top:6px; font-size:12px;">Toplam Hacim: - m³ • Toplam Ağırlık: - t</div>
+          <div id="ballast-total" class="muted" style="margin-top:6px; font-size:12px;">Total Volume: - m³ • Total Weight: - t</div>
         </section>
       </div>
 
       <section class="actions">
-        <button id="calc">Hesapla</button>
-        <button id="prefill" class="secondary">Örnek Doldur</button>
-        <button id="clear" class="secondary">Temizle</button>
+        <button id="calc">Calculate</button>
+        <button id="prefill" class="secondary">Prefill Example</button>
+        <button id="clear" class="secondary">Clear</button>
       </section>
 
       <section class="card results">
-        <h2>Sonuçlar</h2>
+        <h2>Results</h2>
         <div class="grid results-grid">
           <div>
-            <div class="result-label">Deplasman (displacement)</div>
+            <div class="result-label">Displacement (t)</div>
             <div class="result-value" id="resW">0.0</div>
           </div>
           <div>
-            <div class="result-label">Baş Draft (m)</div>
+            <div class="result-label">Draft Forward (m)</div>
             <div class="result-value" id="resTf">0.000</div>
           </div>
           <div>
-            <div class="result-label">Vasat Draftı (m)</div>
+            <div class="result-label">Mean Draft (m)</div>
             <div class="result-value" id="resTm">0.000</div>
           </div>
           <div>
-            <div class="result-label">Kıç Draft (m)</div>
+            <div class="result-label">Draft Aft (m)</div>
             <div class="result-value" id="resTa">0.000</div>
           </div>
           <div>
-            <div class="result-label">Trim (m, kıça +)</div>
+            <div class="result-label">Trim (m, stern +)</div>
             <div class="result-value" id="resTrim">0.00</div>
           </div>
         </div>
         <details class="notes">
-          <summary>Notlar / Varsayımlar</summary>
+          <summary>Notes / Assumptions</summary>
           <ul>
-            <li>Tek TPC ve tek MCT1cm (referans vasat draft civarı) sabittir.</li>
-            <li>LCF sabit alınmıştır; LCG referansı midship’tir (+ ileri).</li>
-            <li>Yoğunluk düzeltmesi: ΔTmean = (W/TPC) × (1.025/ρ).</li>
-            <li>Trim hesabında işaret: kıça trim (+), başa trim (−).</li>
+            <li>TPC and MCT1cm are interpolated from the hydrostatic table at the solved mean draft. If table is absent, fixed fallbacks are used.</li>
+            <li>LCF and LCB are interpolated from the table. LCG/LCF/LCB reference is midship (+ forward).</li>
+            <li>Density correction: with table present, displacement is solved directly using W/ρ; without table, ΔTmean = (W/TPC) × (ρref/ρ).</li>
+            <li>Trim sign convention: stern trim (+), bow trim (−).</li>
           </ul>
           <div class="muted" style="margin-top:6px; font-size:12px;">Deadweight: <span id="resDWT">-</span> t</div>
           <div id="consts-list"></div>
@@ -118,7 +113,7 @@
     </main>
 
     <footer>
-      <span>LBP, LCF, TPC, MCT1cm ve tank LCG’leri PDF verilerinden (yaklaşık) alınmıştır.</span>
+      <span>LBP, LCF, TPC, MCT1cm and tank LCG values are taken from user-provided data.</span>
     </footer>
 
     <script src="constants.js"></script>
@@ -128,8 +123,8 @@
     <div id="wizard-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;">
       <div id="wizard-modal" style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(1000px,95vw); max-height:90vh; overflow:auto; background:#0f172a; color:#e2e8f0; border:1px solid #1e293b; border-radius:8px; box-shadow:0 10px 24px rgba(0,0,0,0.4);">
         <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #1e293b;">
-          <div style="font-weight:600;">Gemi Ekle / Veri İçe Aktarma Sihirbazı</div>
-          <button id="wizard-close" class="secondary">Kapat</button>
+          <div style="font-weight:600;">Add Ship / Import Wizard</div>
+          <button id="wizard-close" class="secondary">Close</button>
         </div>
         <div style="padding:12px 16px; display:grid; gap:12px;">
           <!-- Ship basics -->
@@ -143,78 +138,70 @@
             <label>Constant L.C.G. (m)<input id="wiz-c-x" type="number" step="0.01" placeholder="örn. 0.00" /></label>
             <label>Boylam Datumu
               <select id="wiz-longref">
-                <option value="ap_plus">AP (+ ileri)</option>
-                <option value="fp_minus">FP (− ileri)</option>
+                <option value="ap_plus">AP (+ forward)</option>
+                <option value="fp_minus">FP (− aft)</option>
               </select>
             </label>
           </div>
-          <div class="info" style="font-size:12px; color:#9fb3c8;">PDF/OCR geçici olarak devre dışı. Lütfen verileri TXT/CSV olarak yapıştırın veya yükleyin.</div>
+          
           <div id="req-box" class="card" style="background:#0f172a; border:1px solid #1e293b;">
-            <div style="font-weight:600; margin-bottom:6px;">Gerekli ve Önerilen Bilgiler</div>
+            <div style="font-weight:600; margin-bottom:6px;">Required Information</div>
             <ul style="margin:6px 0 0 18px; color:#cbd5e1; font-size:13px;">
-              <li>Gerekli (Hydrostatic): <b>Draft (m)</b>, <b>TPC (t/cm)</b>, <b>MCT1cm (t·m/cm)</b></li>
-              <li>Önerilen (Hydrostatic → doğruluk artar): <b>LCF (m)</b>, <b>DIS (t) [SW]</b>, <b>LCB (m)</b></li>
-              <li>Gerekli (COT/Other Tanks): <b>Tank adı</b>, <b>LCG (m)</b> (opsiyonel: <b>kapasite m³</b>)</li>
-              <li>Consumables (opsiyonel): <b>FO/DO, FW, LO</b> tankları için LCG ve tercihen kapasite</li>
+              <li>Hydrostatics: Draft (m), TPC (t/cm), MCT1cm (t·m/cm). Recommended: LCF (m), LCB (m), Displacement.</li>
+              <li>LBP (m) and LBP Datum (AP +forward or FP −aft), Hydro reference density ρ_ref.</li>
+              <li>Tank lists: Cargo and Ballast (Name, LCG (m), Capacity m³ optional).</li>
+              <li>Consumables: FW/FO/Others (Name, Type, LCG (m), Capacity optional).</li>
+              <li>Light Ship: Weight (t) and L.C.G. (m). Constant: Weight (t) and L.C.G. (m).</li>
             </ul>
             <div id="wiz-lints" style="margin-top:8px; font-size:12px; color:#93c5fd;"></div>
           </div>
           <!-- Quick multi-file import (button only) -->
           <div id="quick-import" style="border:1px dashed #334155; padding:10px; border-radius:8px; background:#0b1222;">
-            <div style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">Hızlı İçe Aktarma: Hydro + Tank dosyalarını (CSV/TSV/TXT) “Dosyaları Seç” ile yükleyin. Otomatik sınıflandırılır ve ilgili sekmelere eklenir.</div>
             <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-              <button id="choose-all" class="secondary">Dosyaları Seç</button>
+              <button id="choose-all" class="secondary">Choose Files</button>
               <input id="file-all" type="file" multiple accept=".csv,.tsv,.txt" style="display:none;" />
               <span id="quick-log" style="font-size:12px; color:#9fb3c8;"></span>
             </div>
           </div>
           <!-- Tabs -->
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="tab-btn" data-tab="hydro">Hydrostatikler</button>
-            <button class="tab-btn" data-tab="cargo">Cargo Tankları</button>
-            <button class="tab-btn" data-tab="ballast">Ballast Tankları</button>
-            <button class="tab-btn" data-tab="cons">Consumables (FO+FW+LO)</button>
+            <button class="tab-btn" data-tab="hydro">Hydrostatics</button>
+            <button class="tab-btn" data-tab="cargo">Cargo Tanks</button>
+            <button class="tab-btn" data-tab="ballast">Ballast Tanks</button>
+            <button class="tab-btn" data-tab="cons">Consumables (FO/FW/Others)</button>
           </div>
           <div class="tab-pane" id="tab-hydro" style="display:none;">
-            <div class="info" style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">
-              Lütfen hidrostatik veriyi TXT/CSV ile yükleyin. Gerekli sütunlar: Draft (m), TPC (t/cm), MCT1cm (t·m/cm). Önerilen: LCF (m), DIS(FW/SW), LCB (m).
-            </div>
+            
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <button id="map-hydro-btn" class="secondary">Kolon Eşleme</button>
-              <button id="clear-hydro" class="secondary">Temizle</button>
+              <button id="map-hydro-btn" class="secondary">Map Columns</button>
+              <button id="clear-hydro" class="secondary">Clear</button>
             </div>
             <div id="map-hydro" style="margin-top:8px;"></div>
             <div id="preview-hydro" style="margin-top:8px;"></div>
           </div>
           <div class="tab-pane" id="tab-cargo" style="display:none;">
-            <div class="info" style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">
-              Bu alana cargo tank LCG listesi girilir. Gerekli alanlar: Tank adı, LCG (m). Kapasite (HACİM 100%) opsiyoneldir. Sounding tablosu DEĞİL; %100 hacim ve LCG gerekir.
-            </div>
+            
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <button id="map-cargo-btn" class="secondary">Kolon Eşleme</button>
-              <button id="clear-cargo" class="secondary">Temizle</button>
+              <button id="map-cargo-btn" class="secondary">Map Columns</button>
+              <button id="clear-cargo" class="secondary">Clear</button>
             </div>
             <div id="map-cargo" style="margin-top:8px;"></div>
             <div id="preview-cargo" style="margin-top:8px;"></div>
           </div>
           <div class="tab-pane" id="tab-ballast" style="display:none;">
-            <div class="info" style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">
-              Bu alana ballast tank LCG listesi girilir. Gerekli alanlar: Tank adı, LCG (m). Kapasite opsiyonel.
-            </div>
+            
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <button id="map-ballast-btn" class="secondary">Kolon Eşleme</button>
-              <button id="clear-ballast" class="secondary">Temizle</button>
+              <button id="map-ballast-btn" class="secondary">Map Columns</button>
+              <button id="clear-ballast" class="secondary">Clear</button>
             </div>
             <div id="map-ballast" style="margin-top:8px;"></div>
             <div id="preview-ballast" style="margin-top:8px;"></div>
           </div>
           <div class="tab-pane" id="tab-cons" style="display:none;">
-            <div class="info" style="font-size:12px; color:#9fb3c8; margin-bottom:6px;">
-              Consumables (FO/DO, FW, LO) bilgisi gereklidir: Tank adı, tür (fuel|freshwater|lube), LCG (m). Kapasite m³ varsa ekleyin.
-            </div>
+            
             <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-              <button id="map-cons-btn" class="secondary">Kolon Eşleme</button>
-              <button id="clear-cons" class="secondary">Temizle</button>
+              <button id="map-cons-btn" class="secondary">Map Columns</button>
+              <button id="clear-cons" class="secondary">Clear</button>
             </div>
             <div id="map-cons" style="margin-top:8px;"></div>
             <div id="preview-cons" style="margin-top:8px;"></div>
@@ -222,9 +209,9 @@
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
             <div id="wiz-status" style="font-size:12px; color:#9fb3c8;"></div>
             <div style="display:flex; gap:8px;">
-              <button id="wiz-clear-all" class="secondary">Tümünü Temizle</button>
-              <button id="wiz-export" class="secondary">JSON Olarak İndir</button>
-              <button id="wiz-activate">Kaydet ve Etkinleştir</button>
+              <button id="wiz-clear-all" class="secondary">Clear All</button>
+              <button id="wiz-export" class="secondary">Download JSON</button>
+              <button id="wiz-activate">Save and Activate</button>
             </div>
           </div>
 

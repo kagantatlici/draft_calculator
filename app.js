@@ -8,12 +8,39 @@ let LAST_TMEAN = null; // remember last mean draft for better iteration start
 let SHIP_ACTIVE = null; // active ship constants (fallback to SHIP)
 let SHIPS_INDEX = null; // available ships list
 
+// Local storage keys and helpers
+const LS_PREFIX = 'dc_ship_';
+const LS_INDEX_KEY = 'dc_ships_index';
+const LS_ACTIVE_KEY = 'dc_active_ship';
+
+function getLocalIndex() {
+  try { return JSON.parse(localStorage.getItem(LS_INDEX_KEY) || '[]'); } catch(_) { return []; }
+}
+function setLocalIndex(arr) {
+  try { localStorage.setItem(LS_INDEX_KEY, JSON.stringify(arr||[])); } catch(_) {}
+}
+function saveLocalShip(profile) {
+  if (!profile || !profile.ship || !profile.ship.id) return;
+  const id = profile.ship.id;
+  try { localStorage.setItem(LS_PREFIX + id, JSON.stringify(profile)); } catch(_) {}
+  const idx = getLocalIndex();
+  if (!idx.find(s=> s.id === id)) idx.push({ id, name: profile.ship.name || id });
+  setLocalIndex(idx);
+}
+function getLocalShip(id) {
+  try { const txt = localStorage.getItem(LS_PREFIX + id); return txt? JSON.parse(txt) : null; } catch(_) { return null; }
+}
+function setActiveShipID(id) { try { localStorage.setItem(LS_ACTIVE_KEY, id); } catch(_) {} }
+function getActiveShipID() { try { return localStorage.getItem(LS_ACTIVE_KEY) || null; } catch(_) { return null; } }
+
 function convertLongitudinalToMidship(x, lbp, ref) {
   if (!isFinite(x)) return x;
   if (!isFinite(lbp) || lbp <= 0) return x;
   const r = String(ref||'').toLowerCase();
   if (r === 'ap_plus') return x - lbp/2;
-  if (r === 'fp_minus') return (lbp/2) - x;
+  // FP (− aft): values measured from FP, aft is negative.
+  // Convert: x_mid = x_fp + lbp/2
+  if (r === 'fp_minus') return x + lbp/2;
   return x; // assume already midship-based
 }
 
@@ -154,13 +181,13 @@ function renderConstants() {
   const ls = window.LIGHT_SHIP || {};
   const parts = [
     `<div><b>LBP</b>: ${fmt(LBP, 2)} m</div>`,
-    `<div><b>LCF</b>: ${fmt(LCF, 2)} m (midship +ileri)</div>`,
+    `<div><b>LCF</b>: ${fmt(LCF, 2)} m (midship +forward)</div>`,
     `<div><b>TPC</b>: ${fmt(TPC, 1)} t/cm</div>`,
     `<div><b>MCT1cm</b>: ${fmt(MCT1cm, 1)} t·m/cm</div>`,
     `<div><b>ρ_ref</b>: ${fmt(RHO_REF, 3)} t/m³</div>`,
     `<div><b>Light ship</b>: ${ls.weight ?? '-'} t @ LCG ${fmt(ls.lcg ?? 0, 2)} m</div>`,
-    `<div><b>Consumables tankları</b>: ${Array.isArray(CONS_TANKS) ? CONS_TANKS.length : 0} adet</div>`,
-    `<div><b>Tank sayısı</b>: Cargo ${ACTIVE.cargo.length}, Ballast ${ACTIVE.ballast.length}</div>`,
+    `<div><b>Consumables tanks</b>: ${Array.isArray(CONS_TANKS) ? CONS_TANKS.length : 0}</div>`,
+    `<div><b>Tank count</b>: Cargo ${ACTIVE.cargo.length}, Ballast ${ACTIVE.ballast.length}</div>`,
   ];
   box.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;margin-top:8px;color:#9fb3c8;font-size:12px;">${parts.join('')}</div>`;
 }
@@ -505,7 +532,19 @@ async function loadShipsIndex() {
   } catch (_) { return null; }
 }
 
+async function compileShipsIndex() {
+  const remote = await loadShipsIndex() || [];
+  const localIdx = getLocalIndex();
+  const map = new Map();
+  for (const s of remote) map.set(s.id, { id:s.id, name:s.name });
+  for (const s of localIdx) map.set(s.id, { id:s.id, name:s.name }); // local wins
+  return Array.from(map.values());
+}
+
 async function loadShipProfile(id) {
+  // Prefer local storage
+  const local = getLocalShip(id);
+  if (local) return local;
   try {
     const res = await fetch(`./data/ships/${id}.json`);
     if (!res.ok) return null;
@@ -571,24 +610,23 @@ function populateShipDropdown(ships) {
 
 // Init UI
 (async () => {
-  SHIPS_INDEX = await loadShipsIndex();
-  if (Array.isArray(SHIPS_INDEX) && SHIPS_INDEX.length) {
-    populateShipDropdown(SHIPS_INDEX);
-    const first = SHIPS_INDEX[0].id;
+  SHIPS_INDEX = await compileShipsIndex();
+  if (Array.isArray(SHIPS_INDEX)) populateShipDropdown(SHIPS_INDEX);
+  const last = getActiveShipID();
+  if (last) {
     const sel = document.getElementById('ship-select');
-    if (sel) sel.value = first;
-    await activateShip(first);
+    if (sel) sel.value = last;
+    await activateShip(last);
   } else {
-    // Fallback to legacy single-ship data
-    const fromJson = await loadTanksFromJson();
-  ACTIVE = fromJson || { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
-  HYDRO_ROWS = await loadHydroFromJson();
-  CONS_TANKS = await loadConsumablesFromJson();
-  buildTankInputs('cargo-tanks', ACTIVE.cargo);
-  buildTankInputs('ballast-tanks', ACTIVE.ballast);
-  renderConstants();
-  wireConsumablesUI();
-}
+    const make = (n, prefix) => Array.from({length:n}).map((_,i)=>({ id: `${prefix}${i+1}`, name: `${prefix.toUpperCase()} ${i+1}`, lcg: 0, cap_m3: null }));
+    ACTIVE = { cargo: make(6,'COT'), ballast: make(6,'Ballast') };
+    HYDRO_ROWS = null;
+    CONS_TANKS = await loadConsumablesFromJson();
+    buildTankInputs('cargo-tanks', ACTIVE.cargo);
+    buildTankInputs('ballast-tanks', ACTIVE.ballast);
+    renderConstants();
+    wireConsumablesUI();
+  }
 })();
 
 el('calc').addEventListener('click', calc);
@@ -598,8 +636,36 @@ const shipSel = document.getElementById('ship-select');
 if (shipSel) {
   shipSel.addEventListener('change', async (e) => {
     const id = e.target.value;
-    await activateShip(id);
+    if (id) { await activateShip(id); setActiveShipID(id); }
   });
+}
+
+// Export/Import (main header)
+function exportAllLocalShips() {
+  const idx = getLocalIndex();
+  const ships = idx.map(s => getLocalShip(s.id)).filter(Boolean);
+  const bundle = { schemaVersion: 1, ships };
+  const name = `ships_export_${new Date().toISOString().slice(0,10)}.json`;
+  download(name, JSON.stringify(bundle, null, 2));
+}
+async function importAllLocalShips(file) {
+  try {
+    const text = await readFileAsText(file);
+    const data = JSON.parse(text);
+    const arr = Array.isArray(data.ships) ? data.ships : [];
+    for (const p of arr) { if (p && p.ship && p.ship.id) saveLocalShip(p); }
+    // Refresh dropdown
+    SHIPS_INDEX = await compileShipsIndex();
+    populateShipDropdown(SHIPS_INDEX);
+  } catch(e) { alert('Import failed: invalid JSON'); }
+}
+const expBtn = document.getElementById('export-ships');
+if (expBtn) expBtn.addEventListener('click', exportAllLocalShips);
+const impBtn = document.getElementById('import-ships');
+const impFile = document.getElementById('import-file');
+if (impBtn && impFile) {
+  impBtn.addEventListener('click', ()=> impFile.click());
+  impFile.addEventListener('change', async ()=>{ const f=impFile.files&&impFile.files[0]; if (f) await importAllLocalShips(f); impFile.value=''; });
 }
 // Import wizard logic (basic paste-based parser)
 const addShipBtn = document.getElementById('add-ship');
@@ -610,7 +676,7 @@ let OPEN_BUSY = false; // prevent multi-open race (Chrome double listeners, etc.
 
 function showWizard() {
   const ov = document.getElementById('wizard-overlay');
-  if (!ov) { alert('İçe aktarma sihirbazı yüklenemedi.'); return; }
+  if (!ov) { alert('Import wizard could not be opened.'); return; }
   ov.style.display = 'block';
   if (!WIZ_BOUND) bindWizardOnce();
   activateTab('hydro');
@@ -1253,7 +1319,7 @@ function bindWizardOnce() {
     wizard.querySelectorAll('button').forEach(btn=>{ if ((btn.textContent||'').trim().toLowerCase()==='dosyadan yükle') btn.remove(); });
     // Update Hydro info text if old text is still present
     const hydroInfo = document.querySelector('#tab-hydro .info');
-    if (hydroInfo) hydroInfo.textContent = 'Lütfen hidrostatik veriyi TXT/CSV ile yükleyin. Gerekli sütunlar: Draft (m), TPC (t/cm), MCT1cm (t·m/cm). Önerilen: LCF (m), DIS(FW/SW), LCB (m).';
+    if (hydroInfo) hydroInfo.textContent = '';
   })();
 
   // PDF Import (embedded) inside wizard
@@ -1305,7 +1371,7 @@ function bindWizardOnce() {
   if (mapHydBtn) mapHydBtn.addEventListener('click', ()=>{
     const raw = WIZ_LAST.hydroText || '';
     const lines = normText(raw).split(/\r?\n/).filter(l=>l.trim().length>0);
-    if (!lines.length) { alert('Önce dosyadan yükleyin.'); return; }
+    if (!lines.length) { alert('Please load a file first.'); return; }
     buildMapUIHydro(lines, 'map-hydro');
   });
   const fileHydBtn = document.getElementById('upload-hydro');
@@ -1354,7 +1420,7 @@ function bindWizardOnce() {
     if (mapBtn) mapBtn.addEventListener('click', ()=>{
       const raw = WIZ_LAST[`${key}Text`] || '';
       const lines = normText(raw).split(/\r?\n/).filter(l=>l.trim().length>0);
-      if (!lines.length) { alert('Önce dosyadan yükleyin.'); return; }
+      if (!lines.length) { alert('Please load a file first.'); return; }
       buildMapUITanks(lines, `map-${key}`, key==='cons'?'cons':'tank');
     });
     if (upBtn && fileIn) {
@@ -1411,6 +1477,9 @@ function bindWizardOnce() {
   const activateBtn = document.getElementById('wiz-activate');
   if (activateBtn) activateBtn.addEventListener('click', async ()=>{
     const js = buildShipJsonFromWizard();
+    // Save profile to local storage and remember as active
+    saveLocalShip(js);
+    setActiveShipID(js.ship.id);
     // Convert profile longitudes to midship-based using wizard datum before activating
     const profMid = convertProfileLongitudes(JSON.parse(JSON.stringify(js)));
     // Activate in-memory without saving to server
