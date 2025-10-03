@@ -1239,13 +1239,39 @@ function bindWizardOnce() {
     buildTankInputs('cargo-tanks', ACTIVE.cargo);
     buildTankInputs('ballast-tanks', ACTIVE.ballast);
     renderConstants();
+    // Update ship list dropdown with the new ship and select it
+    try {
+      if (!Array.isArray(SHIPS_INDEX)) SHIPS_INDEX = [];
+      const entry = { id: js.ship.id, name: js.ship.name || js.ship.id };
+      const i = SHIPS_INDEX.findIndex(s => s.id === entry.id);
+      if (i >= 0) SHIPS_INDEX[i] = entry; else SHIPS_INDEX.push(entry);
+      populateShipDropdown(SHIPS_INDEX);
+      const sel = document.getElementById('ship-select');
+      if (sel) sel.value = entry.id;
+    } catch(_) { /* noop */ }
     hideWizard();
+  });
+  const clearAllBtn = document.getElementById('wiz-clear-all');
+  if (clearAllBtn) clearAllBtn.addEventListener('click', ()=>{
+    try {
+      WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
+      WIZ_LAST = { hydroText: '', cargoText: '', ballastText: '', consText: '' };
+      // Clear quick previews and mapping areas if present
+      ['hydro','cargo','ballast','cons'].forEach(k => {
+        const pv = document.getElementById(`preview-${k}`);
+        if (pv) pv.innerHTML = '';
+        const map = document.getElementById(`map-${k}`);
+        if (map) map.innerHTML = '';
+      });
+    } catch(_) { /* noop */ }
+    updateWizStatus();
+    updateProgramPreviews();
   });
 }
 
 function buildShipJsonFromWizard() {
   const name = document.getElementById('wiz-name').value.trim() || 'NEW SHIP';
-  const id = document.getElementById('wiz-id').value.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
   const lbpEl = document.getElementById('wiz-lbp');
   const rhoEl = document.getElementById('wiz-rho');
   const lswEl = document.getElementById('wiz-ls-w');

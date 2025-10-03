@@ -110,7 +110,6 @@
           <!-- Ship basics -->
           <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;">
             <label>Gemi Adı<input id="wiz-name" type="text" placeholder="Örn. MAGNI ALEXA" /></label>
-            <label>Gemi ID<input id="wiz-id" type="text" placeholder="örn. magni_alexa" /></label>
           </div>
           <div class="info" style="font-size:12px; color:#9fb3c8;">PDF/OCR geçici olarak devre dışı. Lütfen verileri TXT/CSV olarak yapıştırın veya yükleyin.</div>
           <div id="req-box" class="card" style="background:#0f172a; border:1px solid #1e293b;">
@@ -186,6 +185,7 @@
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
             <div id="wiz-status" style="font-size:12px; color:#9fb3c8;"></div>
             <div style="display:flex; gap:8px;">
+              <button id="wiz-clear-all" class="secondary">Tümünü Temizle</button>
               <button id="wiz-export" class="secondary">JSON Olarak İndir</button>
               <button id="wiz-activate">Kaydet ve Etkinleştir</button>
             </div>
