@@ -3,6 +3,7 @@
 let ACTIVE = { cargo: [], ballast: [] };
 let HYDRO_ROWS = null; // active ship hydro rows
 let CONS_TANKS = null; // active ship consumable tanks
+let CONS_GROUPS = { fw:{cap:0, lcg:0}, fo:{cap:0, lcg:0}, oth:{cap:0, lcg:0} };
 let LAST_TMEAN = null; // remember last mean draft for better iteration start
 let SHIP_ACTIVE = null; // active ship constants (fallback to SHIP)
 let SHIPS_INDEX = null; // available ships list
@@ -41,11 +42,10 @@ async function loadConsumablesFromJson() {
     if (!res.ok) return null;
     const data = await res.json();
     const tanks = Array.isArray(data.tanks) ? data.tanks : [];
-    // keep only known types and numeric lcg; cap_m3 optional
-    const valid = ['fuel', 'freshwater', 'lube'];
+    // accept any type; we will group anything not 'freshwater' or 'fuel' under Others
     const rows = tanks
       .map(t => ({ name: t.name, type: String(t.type||'').toLowerCase(), lcg: Number(t.lcg), cap_m3: (t.cap_m3!=null?Number(t.cap_m3):null) }))
-      .filter(t => valid.includes(t.type) && isFinite(t.lcg));
+      .filter(t => isFinite(t.lcg));
     return rows.length ? rows : null;
   } catch (_) { return null; }
 }
@@ -159,52 +159,57 @@ function readWeights(tanks) {
   return items;
 }
 
+function getConsGroupsFromTanks() {
+  // Derive total capacity and average LCG per group
+  const groups = { fw:{cap:0, lcg:0}, fo:{cap:0, lcg:0}, oth:{cap:0, lcg:0} };
+  if (!Array.isArray(CONS_TANKS) || !CONS_TANKS.length) return groups;
+  const map = { freshwater:'fw', fuel:'fo' };
+  const accum = { fw:{cap:0, mom:0, cnt:0}, fo:{cap:0, mom:0, cnt:0}, oth:{cap:0, mom:0, cnt:0} };
+  for (const t of CONS_TANKS) {
+    const k = map[t.type] || 'oth';
+    const cap = isFinite(t.cap_m3) ? Number(t.cap_m3) : 0;
+    accum[k].cap += cap;
+    accum[k].mom += (cap>0? cap : 1) * t.lcg;
+    accum[k].cnt += 1;
+  }
+  for (const k of ['fw','fo','oth']) {
+    const a = accum[k];
+    const denom = (a.cap>0 ? a.cap : a.cnt || 1);
+    groups[k].cap = a.cap;
+    groups[k].lcg = a.mom / denom;
+  }
+  return groups;
+}
+
+function wireConsumablesUI() {
+  // Show capacities computed from imported consumables and keep only weight inputs editable
+  CONS_GROUPS = getConsGroupsFromTanks();
+  const setCap = (id,val)=>{ const e=el(id); if(e) e.textContent = `Toplam Kap: ${val>0? val.toFixed(1):'-'} m³`; };
+  setCap('cap-fw', CONS_GROUPS.fw.cap);
+  setCap('cap-fo', CONS_GROUPS.fo.cap);
+  setCap('cap-oth', CONS_GROUPS.oth.cap);
+}
+
 function calc() {
   const base = SHIP_ACTIVE || SHIP;
   const rho = parseFloat(el('rho').value || String(base.RHO_REF || 1.025)) || (base.RHO_REF || 1.025);
-  const wCons = parseFloat(el('fofw').value || '0') || 0;
-  // Auto-consumables LCG from data/consumables.json if available
-  const lcgConsumables = (() => {
-    if (!(Array.isArray(CONS_TANKS) && CONS_TANKS.length && wCons>0)) return LCG_FO_FW;
-    const rhoBy = { fuel: 0.85, freshwater: 1.00, lube: 0.90 };
-    const types = ['fuel','freshwater','lube'];
-    let eqWeights = {};
-    let typeLCG = {};
-    for (const tp of types) {
-      const arr = CONS_TANKS.filter(t => t.type===tp);
-      if (!arr.length) continue;
-      const sumCap = arr.reduce((s,t)=> s + (isFinite(t.cap_m3)? t.cap_m3 : 0), 0);
-      const rho_t = rhoBy[tp] ?? 1.0;
-      const eq = sumCap > 0 ? rho_t * sumCap : arr.length * rho_t; // fallback equal if no caps
-      eqWeights[tp] = eq;
-      // capacity-weighted LCG for the type
-      let lcg;
-      if (sumCap > 0) {
-        const num = arr.reduce((s,t)=> s + (t.cap_m3||0) * t.lcg, 0);
-        lcg = num / sumCap;
-      } else {
-        const num = arr.reduce((s,t)=> s + t.lcg, 0); lcg = num / arr.length;
-      }
-      typeLCG[tp] = lcg;
-    }
-    const eqSum = Object.values(eqWeights).reduce((s,v)=> s+v, 0);
-    if (eqSum <= 0) return LCG_FO_FW;
-    // split total consumables to types by equivalent weights
-    const Wt = {};
-    for (const tp of Object.keys(eqWeights)) Wt[tp] = wCons * (eqWeights[tp] / eqSum);
-    const wSum = Object.values(Wt).reduce((s,v)=> s+v, 0);
-    if (wSum <= 0) return LCG_FO_FW;
-    const num = Object.keys(Wt).reduce((s,tp)=> s + (Wt[tp] * (typeLCG[tp] ?? 0)), 0);
-    return num / wSum;
-  })();
+  // Read consumables groups as separate masses at their average LCGs
+  if (!CONS_GROUPS || !CONS_GROUPS.fw) CONS_GROUPS = getConsGroupsFromTanks();
 
   // Collect tank items
   const cargo = readWeights(ACTIVE.cargo);
   const ballast = readWeights(ACTIVE.ballast);
 
-  // FO+FW single input as one mass at fixed LCG
   const items = [...cargo, ...ballast];
-  if (wCons !== 0) items.push({ name: 'Consumables', w: wCons, x: lcgConsumables });
+  const groupsOrder = [
+    {k:'fw', label:'FW'},
+    {k:'fo', label:'FO'},
+    {k:'oth', label:'Others'},
+  ];
+  for (const g of groupsOrder) {
+    const w = parseFloat(el(`${g.k}_w`)?.value || '0') || 0;
+    if (w !== 0) items.push({ name: `Cons ${g.label}`, w, x: CONS_GROUPS[g.k].lcg || LCG_FO_FW });
+  }
   // Always include light ship if available
   if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number' && window.LIGHT_SHIP.weight > 0) {
     items.push({ name: 'Light Ship', w: window.LIGHT_SHIP.weight, x: (window.LIGHT_SHIP.lcg ?? 0) });
@@ -276,7 +281,10 @@ function calc() {
 function clearAll() {
   const base = SHIP_ACTIVE || SHIP;
   el('rho').value = String(base.RHO_REF || 1.025);
-  el('fofw').value = '0';
+  ['fw','fo','oth'].forEach(k=>{
+    const set=(id,val)=>{ const e=el(id); if(e) e.value = val; };
+    set(k+'_w','');
+  });
   // overrides and lightship input removed from UI
   for (const t of [...ACTIVE.cargo, ...ACTIVE.ballast]) {
     const inp = document.getElementById(`w_${t.id}`);
@@ -294,7 +302,7 @@ function prefillExample() {
   const rhoCargo = 0.78;
   const fill = 0.98;
   el('rho').value = (SHIP.RHO_REF).toString();
-  el('fofw').value = '0';
+  // removed single consumables field
 
   for (const t of ACTIVE.cargo) {
     const cap = Number(t.cap_m3 || 0);
@@ -357,16 +365,17 @@ async function activateShip(id) {
     }
     // Consumables tanks: prefer per-ship, else global file
     const cons = (profile.tanks && Array.isArray(profile.tanks.consumables)) ? profile.tanks.consumables : null;
-    if (cons && cons.length) {
-      CONS_TANKS = cons.map(t=>({ name: t.name, type: String(t.type||'').toLowerCase(), lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
-    } else {
-      CONS_TANKS = await loadConsumablesFromJson();
-    }
-    // Rebuild UI
-    buildTankInputs('cargo-tanks', ACTIVE.cargo);
-    buildTankInputs('ballast-tanks', ACTIVE.ballast);
-    renderConstants();
+  if (cons && cons.length) {
+    CONS_TANKS = cons.map(t=>({ name: t.name, type: String(t.type||'').toLowerCase(), lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
+  } else {
+    CONS_TANKS = await loadConsumablesFromJson();
   }
+  // Rebuild UI
+  buildTankInputs('cargo-tanks', ACTIVE.cargo);
+  buildTankInputs('ballast-tanks', ACTIVE.ballast);
+  renderConstants();
+  wireConsumablesUI();
+}
 }
 
 function populateShipDropdown(ships) {
@@ -392,13 +401,14 @@ function populateShipDropdown(ships) {
   } else {
     // Fallback to legacy single-ship data
     const fromJson = await loadTanksFromJson();
-    ACTIVE = fromJson || { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
-    HYDRO_ROWS = await loadHydroFromJson();
-    CONS_TANKS = await loadConsumablesFromJson();
-    buildTankInputs('cargo-tanks', ACTIVE.cargo);
-    buildTankInputs('ballast-tanks', ACTIVE.ballast);
-    renderConstants();
-  }
+  ACTIVE = fromJson || { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
+  HYDRO_ROWS = await loadHydroFromJson();
+  CONS_TANKS = await loadConsumablesFromJson();
+  buildTankInputs('cargo-tanks', ACTIVE.cargo);
+  buildTankInputs('ballast-tanks', ACTIVE.ballast);
+  renderConstants();
+  wireConsumablesUI();
+}
 })();
 
 el('calc').addEventListener('click', calc);
@@ -801,7 +811,7 @@ function buildMapUITanks(lines, containerId, mode) {
         if (/hfo|f\.o|fuel|d\.o|mdo|mgo|diesel|bunker/.test(s)) type='fuel';
         else if (/fresh|fw\b|freshwater/.test(s)) type='freshwater';
         else if (/lube|lub\.? oil|lo\b/.test(s)) type='lube';
-        else type='fuel';
+        else type='other';
       }
       if (mode==='cons') rows.push({ name, type, lcg, cap_m3: isFinite(cap)? cap : undefined });
       else rows.push({ name, lcg, cap_m3: isFinite(cap)? cap : undefined });
@@ -819,7 +829,7 @@ function parseTanksGeneric(text, mode) {
     if (/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/.test(s) || /(serv|sett|slud|drain|over)/.test(s)) return 'fuel';
     if (/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/.test(s)) return 'freshwater';
     if (/(^|\b)(lo|l\.o\.|lube)(\b|\.)/.test(s) || /cyl\.o|cyl\.?oil|hyd\.o|hydraulic|lubric/.test(s)) return 'lube';
-    return 'fuel';
+    return 'other';
   };
   for (const raw of lines) {
     const l = raw.trim(); if (!l) continue;
@@ -926,8 +936,8 @@ function parseCsvSmart(text) {
       if (any(raw, pat.fw) || any(s, pat.fw)) return { cat:'cons', type:'freshwater' };
       if (any(raw, pat.lube) || any(s, pat.lube)) return { cat:'cons', type:'lube' };
       if (any(raw, pat.fuel) || any(s, pat.fuel)) return { cat:'cons', type:'fuel' };
-      // fallback: all others → Consumables
-      return { cat:'cons', type:'fuel' };
+      // fallback: all others → Consumables (other)
+      return { cat:'cons', type:'other' };
     };
     for (let i=1;i<lines.length;i++){
       const cols = splitLine(lines[i], delim);
@@ -938,7 +948,7 @@ function parseCsvSmart(text) {
       const cls = classifyTank(name);
       if (cls.cat==='cargo') cargo.push(entry);
       else if (cls.cat==='ballast') ballast.push(entry);
-      else cons.push({ ...entry, type: cls.type||'fuel' });
+      else cons.push({ ...entry, type: cls.type||'other' });
     }
     return { kind:'tanks', cargo, ballast, cons };
   }

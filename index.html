@@ -29,10 +29,30 @@
             Deniz suyu yoğunluğu ρ (t/m³)
             <input id="rho" type="number" step="0.001" value="1.025" />
           </label>
-          <label>
-            Consumables (FO+FW+LO) toplamı (t)
-            <input id="fofw" type="number" step="0.1" value="0" />
-          </label>
+        </div>
+        <div class="grid" id="consumables-group" style="margin-top:8px; grid-template-columns: 1fr; gap:8px;">
+          <div class="muted">Consumables Girdileri (FW, FO, Others)</div>
+          <div class="cons-row" data-kind="fw">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <b style="min-width:60px;">FW</b>
+              <span class="cap-label" id="cap-fw">Toplam Kap: -</span>
+              <label>Ağırlık (t)<input id="fw_w" type="number" step="0.1" placeholder="mt" /></label>
+            </div>
+          </div>
+          <div class="cons-row" data-kind="fo">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <b style="min-width:60px;">FO</b>
+              <span class="cap-label" id="cap-fo">Toplam Kap: -</span>
+              <label>Ağırlık (t)<input id="fo_w" type="number" step="0.1" placeholder="mt" /></label>
+            </div>
+          </div>
+          <div class="cons-row" data-kind="oth">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <b style="min-width:60px;">Others</b>
+              <span class="cap-label" id="cap-oth">Toplam Kap: -</span>
+              <label>Ağırlık (t)<input id="oth_w" type="number" step="0.1" placeholder="mt" /></label>
+            </div>
+          </div>
         </div>
         
       </section>
