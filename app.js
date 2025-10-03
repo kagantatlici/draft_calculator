@@ -124,6 +124,16 @@ function renderConstants() {
 function buildTankInputs(containerId, tanks) {
   const container = el(containerId);
   container.innerHTML = '';
+  // Header row
+  const head = document.createElement('div');
+  head.className = 'tank tank-head';
+  const hName = document.createElement('div'); hName.className = 'name'; hName.textContent = 'Tank'; head.appendChild(hName);
+  const hCap = document.createElement('div'); hCap.className = 'cap'; hCap.textContent = 'Cap (m³)'; head.appendChild(hCap);
+  const hPct = document.createElement('div'); hPct.className = 'muted'; hPct.textContent = '%'; head.appendChild(hPct);
+  const hVol = document.createElement('div'); hVol.className = 'muted'; hVol.textContent = 'Hacim (m³)'; head.appendChild(hVol);
+  const hRho = document.createElement('div'); hRho.className = 'muted'; hRho.textContent = 'ρ (t/m³)'; head.appendChild(hRho);
+  const hW = document.createElement('div'); hW.className = 'muted'; hW.textContent = 'Ağırlık (t)'; head.appendChild(hW);
+  container.appendChild(head);
   for (const t of tanks) {
     const wrap = document.createElement('div');
     wrap.className = 'tank';
@@ -139,46 +149,22 @@ function buildTankInputs(containerId, tanks) {
     wrap.appendChild(cap);
 
     // Controls: %, Volume, Density, Weight with bi-directional sync
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.gap = '6px';
-    row.style.flexWrap = 'wrap';
-
-    const pLbl = document.createElement('label');
-    pLbl.textContent = '%';
+    // Inputs as grid columns to keep single-line layout
     const pInput = document.createElement('input');
-    pInput.type = 'number'; pInput.step = '0.1'; pInput.id = `p_${t.id}`;
-    pInput.placeholder = '%';
-    pLbl.appendChild(pInput);
-    row.appendChild(pLbl);
+    pInput.type = 'number'; pInput.step = '0.1'; pInput.id = `p_${t.id}`; pInput.placeholder = '%'; pInput.setAttribute('aria-label','Yüzde');
+    wrap.appendChild(pInput);
 
-    const vLbl = document.createElement('label');
-    vLbl.textContent = 'Hacim (m³)';
     const vInput = document.createElement('input');
-    vInput.type = 'number'; vInput.step = '0.1'; vInput.id = `v_${t.id}`;
-    vInput.placeholder = 'm³';
-    vLbl.appendChild(vInput);
-    row.appendChild(vLbl);
+    vInput.type = 'number'; vInput.step = '0.1'; vInput.id = `v_${t.id}`; vInput.placeholder = 'm³'; vInput.setAttribute('aria-label','Hacim');
+    wrap.appendChild(vInput);
 
-    const rLbl = document.createElement('label');
-    rLbl.textContent = 'Yoğunluk (t/m³)';
     const rInput = document.createElement('input');
-    rInput.type = 'number'; rInput.step = '0.01'; rInput.id = `r_${t.id}`;
-    rInput.placeholder = (containerId === 'ballast-tanks') ? '1.025' : '0.80';
-    rLbl.appendChild(rInput);
-    row.appendChild(rLbl);
+    rInput.type = 'number'; rInput.step = '0.01'; rInput.id = `r_${t.id}`; rInput.placeholder = (containerId === 'ballast-tanks') ? '1.025' : '0.80'; rInput.setAttribute('aria-label','Yoğunluk');
+    wrap.appendChild(rInput);
 
-    const wLbl = document.createElement('label');
-    wLbl.textContent = 'Ağırlık (t)';
     const wInput = document.createElement('input');
-    wInput.type = 'number'; wInput.step = '0.1'; wInput.value = '0';
-    wInput.id = `w_${t.id}`;
-    wInput.placeholder = 'mt';
-    wLbl.appendChild(wInput);
-    row.appendChild(wLbl);
-
-    wrap.appendChild(row);
+    wInput.type = 'number'; wInput.step = '0.1'; wInput.value = '0'; wInput.id = `w_${t.id}`; wInput.placeholder = 'mt'; wInput.setAttribute('aria-label','Ağırlık');
+    wrap.appendChild(wInput);
 
     // Sync logic per tank
     const capVal = isFinite(Number(t.cap_m3)) ? Number(t.cap_m3) : 0;
@@ -360,8 +346,12 @@ function clearAll() {
   });
   // overrides and lightship input removed from UI
   for (const t of [...ACTIVE.cargo, ...ACTIVE.ballast]) {
-    const inp = document.getElementById(`w_${t.id}`);
-    if (inp) inp.value = '0';
+    const wp = document.getElementById(`w_${t.id}`);
+    if (wp) wp.value = '0';
+    const pp = document.getElementById(`p_${t.id}`);
+    if (pp) pp.value = '';
+    const vp = document.getElementById(`v_${t.id}`);
+    if (vp) vp.value = '';
   }
   el('resW').textContent = '0.0';
   el('resTm').textContent = '0.000';
