@@ -8,6 +8,43 @@ let LAST_TMEAN = null; // remember last mean draft for better iteration start
 let SHIP_ACTIVE = null; // active ship constants (fallback to SHIP)
 let SHIPS_INDEX = null; // available ships list
 
+function convertLongitudinalToMidship(x, lbp, ref) {
+  if (!isFinite(x)) return x;
+  if (!isFinite(lbp) || lbp <= 0) return x;
+  const r = String(ref||'').toLowerCase();
+  if (r === 'ap_plus') return x - lbp/2;
+  if (r === 'fp_minus') return (lbp/2) - x;
+  return x; // assume already midship-based
+}
+
+function convertProfileLongitudes(profile) {
+  try {
+    const lbp = Number(profile.ship && profile.ship.lbp);
+    const ref = profile.ship && profile.ship.long_ref;
+    if (!isFinite(lbp) || !(ref==='ap_plus' || ref==='fp_minus')) return profile;
+    // Convert hydro rows
+    if (profile.hydrostatics && Array.isArray(profile.hydrostatics.rows)) {
+      for (const r of profile.hydrostatics.rows) {
+        if (r && typeof r.lcf_m === 'number') r.lcf_m = convertLongitudinalToMidship(r.lcf_m, lbp, ref);
+        if (r && typeof r.lcb_m === 'number') r.lcb_m = convertLongitudinalToMidship(r.lcb_m, lbp, ref);
+      }
+    }
+    // Convert tank LCGs
+    const cats = ['cargo','ballast','consumables'];
+    if (profile.tanks) {
+      for (const c of cats) {
+        const arr = profile.tanks[c];
+        if (Array.isArray(arr)) {
+          for (const t of arr) {
+            if (t && typeof t.lcg === 'number') t.lcg = convertLongitudinalToMidship(t.lcg, lbp, ref);
+          }
+        }
+      }
+    }
+  } catch(_){ /* noop */ }
+  return profile;
+}
+
 async function loadTanksFromJson() {
   try {
     const res = await fetch('./data/tanks.json');
@@ -196,6 +233,7 @@ function buildTankInputs(containerId, tanks) {
       if (isFinite(P)) pInput.value = (P || 0).toFixed(1);
       if (isFinite(V)) vInput.value = (V || 0).toFixed(1);
       if (isFinite(W)) wInput.value = (W || 0).toFixed(1);
+      updateTankTotals(containerId, tanks);
     };
     pInput.addEventListener('input', ()=> sync('pct'));
     vInput.addEventListener('input', ()=> sync('vol'));
@@ -204,6 +242,8 @@ function buildTankInputs(containerId, tanks) {
 
     container.appendChild(wrap);
   }
+  // initial totals
+  updateTankTotals(containerId, tanks);
 }
 
 function readWeights(tanks) {
@@ -213,6 +253,27 @@ function readWeights(tanks) {
     if (v !== 0) items.push({ name: t.name, w: v, x: t.lcg });
   }
   return items;
+}
+
+function updateTankTotals(containerId, tanks) {
+  const isCargo = (containerId === 'cargo-tanks');
+  const totalEl = document.getElementById(isCargo ? 'cargo-total' : 'ballast-total');
+  if (!totalEl) return;
+  let sumV = 0, sumW = 0;
+  for (const t of tanks) {
+    const id = t.id;
+    const cap = isFinite(Number(t.cap_m3)) ? Number(t.cap_m3) : 0;
+    const p = parseFloat(el(`p_${id}`)?.value || '');
+    const v = parseFloat(el(`v_${id}`)?.value || '');
+    const r = parseFloat(el(`r_${id}`)?.value || '');
+    const w = parseFloat(el(`w_${id}`)?.value || '');
+    let V = 0, W = 0;
+    if (isFinite(v)) V = v; else if (isFinite(p) && cap>0) V = cap * (p/100);
+    if (isFinite(w)) W = w; else if (isFinite(V) && isFinite(r) && r>0) W = V * r;
+    if (isFinite(V)) sumV += V;
+    if (isFinite(W)) sumW += W;
+  }
+  totalEl.textContent = `Toplam Hacim: ${isFinite(sumV)? sumV.toFixed(1):'-'} m³ • Toplam Ağırlık: ${isFinite(sumW)? sumW.toFixed(1):'-'} t`;
 }
 
 function getConsGroupsFromTanks() {
@@ -247,6 +308,20 @@ function wireConsumablesUI() {
   const total = (CONS_GROUPS.fw.cap||0) + (CONS_GROUPS.fo.cap||0) + (CONS_GROUPS.oth.cap||0);
   const totalEl = el('cap-cons-total');
   if (totalEl) totalEl.textContent = `Toplam Consumables Kapasite: ${total>0? total.toFixed(1):'-'} m³`;
+  const updateConsVols = () => {
+    const rhoDef = { fw: 1.0, fo: 0.85, oth: 0.90 };
+    const w_fw = parseFloat(el('fw_w')?.value||'')||0;
+    const w_fo = parseFloat(el('fo_w')?.value||'')||0;
+    const w_ot = parseFloat(el('oth_w')?.value||'')||0;
+    const v_fw = w_fw / (rhoDef.fw||1);
+    const v_fo = w_fo / (rhoDef.fo||1);
+    const v_ot = w_ot / (rhoDef.oth||1);
+    const sum = v_fw + v_fo + v_ot;
+    const elSum = el('cons-volumes');
+    if (elSum) elSum.textContent = `Toplam Consumables Hacim: ${isFinite(sum)? sum.toFixed(1):'-'} m³`;
+  };
+  ['fw_w','fo_w','oth_w'].forEach(id=>{ const e=el(id); if(e){ e.addEventListener('input', updateConsVols); e.addEventListener('change', updateConsVols);} });
+  updateConsVols();
 }
 
 function calc() {
@@ -358,26 +433,53 @@ function clearAll() {
   el('resTa').textContent = '0.000';
   el('resTf').textContent = '0.000';
   el('resTrim').textContent = '0.0';
+  updateTankTotals('cargo-tanks', ACTIVE.cargo);
+  updateTankTotals('ballast-tanks', ACTIVE.ballast);
+  if (typeof wireConsumablesUI === 'function') wireConsumablesUI();
 }
 
 function prefillExample() {
-  // İstenilen kural: ballast boş, cargo %98 doluluk ve ρ=0.78 t/m³
-  const rhoCargo = 0.78;
+  // New example:
+  // - All COT: %98, density 0.874
+  // - Ballast: empty
+  // - Consumables: FW 359.4 t, FO 1129.3 t, Others 222.1 t
+  const rhoCargo = 0.874;
   const fill = 0.98;
   el('rho').value = (SHIP.RHO_REF).toString();
-  // removed single consumables field
 
   for (const t of ACTIVE.cargo) {
     const cap = Number(t.cap_m3 || 0);
-    const mt = cap > 0 ? cap * fill * rhoCargo : 0;
-    const inp = document.getElementById(`w_${t.id}`);
-    if (inp) inp.value = mt.toFixed(1);
+    const p = document.getElementById(`p_${t.id}`);
+    const v = document.getElementById(`v_${t.id}`);
+    const r = document.getElementById(`r_${t.id}`);
+    const w = document.getElementById(`w_${t.id}`);
+    if (p) p.value = (fill*100).toFixed(1);
+    if (r) r.value = rhoCargo.toFixed(3);
+    if (cap > 0) {
+      const vol = cap * fill;
+      const wt = vol * rhoCargo;
+      if (v) v.value = vol.toFixed(1);
+      if (w) w.value = wt.toFixed(1);
+    } else if (w) {
+      w.value = '0';
+    }
   }
   for (const t of ACTIVE.ballast) {
-    const inp = document.getElementById(`w_${t.id}`);
-    if (inp) inp.value = '0';
+    const p = document.getElementById(`p_${t.id}`);
+    const v = document.getElementById(`v_${t.id}`);
+    const w = document.getElementById(`w_${t.id}`);
+    if (p) p.value = '';
+    if (v) v.value = '';
+    if (w) w.value = '0';
   }
-
+  const setVal = (id, val) => { const e=el(id); if(e) e.value = String(val); };
+  setVal('fw_w', 359.4);
+  setVal('fo_w', 1129.3);
+  setVal('oth_w', 222.1);
+  updateTankTotals('cargo-tanks', ACTIVE.cargo);
+  updateTankTotals('ballast-tanks', ACTIVE.ballast);
+  // Update consumables volumes display
+  if (typeof wireConsumablesUI === 'function') wireConsumablesUI();
   calc();
 }
 
@@ -403,7 +505,9 @@ async function loadShipProfile(id) {
 async function activateShip(id) {
   const profile = await loadShipProfile(id);
   if (profile && profile.ship) {
-    const s = profile.ship;
+    // Convert LCF/LCB/LCG to midship-based if profile specifies a longitudinal datum
+    const profMid = convertProfileLongitudes(JSON.parse(JSON.stringify(profile)));
+    const s = profMid.ship;
     SHIP_ACTIVE = {
       LBP: s.lbp ?? SHIP.LBP,
       LCF: SHIP.LCF, // base until per-ship static overrides provided
@@ -412,11 +516,11 @@ async function activateShip(id) {
       RHO_REF: s.rho_ref ?? SHIP.RHO_REF,
     };
     window.LIGHT_SHIP = s.light_ship || window.LIGHT_SHIP;
-    const rows = (profile.hydrostatics && Array.isArray(profile.hydrostatics.rows)) ? profile.hydrostatics.rows : [];
+    const rows = (profMid.hydrostatics && Array.isArray(profMid.hydrostatics.rows)) ? profMid.hydrostatics.rows : [];
     HYDRO_ROWS = rows.length ? rows.sort((a,b)=>a.draft_m-b.draft_m) : await loadHydroFromJson();
     // Tanks
-    const cargo = (profile.tanks && Array.isArray(profile.tanks.cargo)) ? profile.tanks.cargo : [];
-    const ballast = (profile.tanks && Array.isArray(profile.tanks.ballast)) ? profile.tanks.ballast : [];
+    const cargo = (profMid.tanks && Array.isArray(profMid.tanks.cargo)) ? profMid.tanks.cargo : [];
+    const ballast = (profMid.tanks && Array.isArray(profMid.tanks.ballast)) ? profMid.tanks.ballast : [];
     if (cargo.length + ballast.length > 0) {
       ACTIVE = {
         cargo: cargo.map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
@@ -427,7 +531,7 @@ async function activateShip(id) {
       ACTIVE = fromJson || { cargo: CARGO_TANKS, ballast: BALLAST_TANKS };
     }
     // Consumables tanks: prefer per-ship, else global file
-    const cons = (profile.tanks && Array.isArray(profile.tanks.consumables)) ? profile.tanks.consumables : null;
+    const cons = (profMid.tanks && Array.isArray(profMid.tanks.consumables)) ? profMid.tanks.consumables : null;
   if (cons && cons.length) {
     CONS_TANKS = cons.map(t=>({ name: t.name, type: String(t.type||'').toLowerCase(), lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
   } else {
@@ -1294,28 +1398,30 @@ function bindWizardOnce() {
   const activateBtn = document.getElementById('wiz-activate');
   if (activateBtn) activateBtn.addEventListener('click', async ()=>{
     const js = buildShipJsonFromWizard();
+    // Convert profile longitudes to midship-based using wizard datum before activating
+    const profMid = convertProfileLongitudes(JSON.parse(JSON.stringify(js)));
     // Activate in-memory without saving to server
     SHIP_ACTIVE = {
-      LBP: js.ship.lbp ?? SHIP.LBP,
+      LBP: profMid.ship.lbp ?? SHIP.LBP,
       LCF: SHIP.LCF,
       TPC: SHIP.TPC,
       MCT1cm: SHIP.MCT1cm,
-      RHO_REF: js.ship.rho_ref ?? SHIP.RHO_REF,
+      RHO_REF: profMid.ship.rho_ref ?? SHIP.RHO_REF,
     };
-    window.LIGHT_SHIP = js.ship.light_ship || window.LIGHT_SHIP;
-    HYDRO_ROWS = (js.hydrostatics.rows||[]).sort((a,b)=>a.draft_m-b.draft_m);
+    window.LIGHT_SHIP = profMid.ship.light_ship || window.LIGHT_SHIP;
+    HYDRO_ROWS = (profMid.hydrostatics.rows||[]).sort((a,b)=>a.draft_m-b.draft_m);
     ACTIVE = {
-      cargo: (js.tanks.cargo||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
-      ballast: (js.tanks.ballast||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+      cargo: (profMid.tanks.cargo||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
+      ballast: (profMid.tanks.ballast||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
     };
-    CONS_TANKS = (js.tanks.consumables||[]).map(t=>({ name: t.name, type: t.type, lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
+    CONS_TANKS = (profMid.tanks.consumables||[]).map(t=>({ name: t.name, type: t.type, lcg: Number(t.lcg), cap_m3: t.cap_m3 }));
     buildTankInputs('cargo-tanks', ACTIVE.cargo);
     buildTankInputs('ballast-tanks', ACTIVE.ballast);
     renderConstants();
     // Update ship list dropdown with the new ship and select it
     try {
       if (!Array.isArray(SHIPS_INDEX)) SHIPS_INDEX = [];
-      const entry = { id: js.ship.id, name: js.ship.name || js.ship.id };
+      const entry = { id: profMid.ship.id, name: profMid.ship.name || profMid.ship.id };
       const i = SHIPS_INDEX.findIndex(s => s.id === entry.id);
       if (i >= 0) SHIPS_INDEX[i] = entry; else SHIPS_INDEX.push(entry);
       populateShipDropdown(SHIPS_INDEX);
@@ -1349,10 +1455,12 @@ function buildShipJsonFromWizard() {
   const rhoEl = document.getElementById('wiz-rho');
   const lswEl = document.getElementById('wiz-ls-w');
   const lsxEl = document.getElementById('wiz-ls-x');
+  const longEl = document.getElementById('wiz-longref');
   const lbp = lbpEl ? toNumber(lbpEl.value) : NaN;
   const rho = rhoEl ? toNumber(rhoEl.value) : NaN;
   const lsw = lswEl ? toNumber(lswEl.value) : NaN;
   const lsx = lsxEl ? toNumber(lsxEl.value) : NaN;
+  const long_ref = longEl ? String(longEl.value||'').toLowerCase() : undefined;
   const cargo = WIZ.cargo.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const ballast = WIZ.ballast.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const cons = WIZ.cons.map(t=>({ name:t.name, type:t.type, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
@@ -1369,6 +1477,7 @@ function buildShipJsonFromWizard() {
       id, name,
       lbp: isFinite(lbp) ? lbp : undefined,
       rho_ref: isFinite(rho) ? rho : undefined,
+      long_ref: long_ref,
       light_ship: (isFinite(lsw) && isFinite(lsx)) ? { weight: lsw, lcg: lsx } : undefined,
     },
     hydrostatics: { rows: hydro },
