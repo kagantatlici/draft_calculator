@@ -41,6 +41,13 @@ function convertProfileLongitudes(profile) {
         }
       }
     }
+    // Convert light ship and constant LCGs if provided
+    if (profile.ship && profile.ship.light_ship && typeof profile.ship.light_ship.lcg === 'number') {
+      profile.ship.light_ship.lcg = convertLongitudinalToMidship(profile.ship.light_ship.lcg, lbp, ref);
+    }
+    if (profile.ship && profile.ship.constant && typeof profile.ship.constant.lcg === 'number') {
+      profile.ship.constant.lcg = convertLongitudinalToMidship(profile.ship.constant.lcg, lbp, ref);
+    }
   } catch(_){ /* noop */ }
   return profile;
 }
@@ -308,20 +315,16 @@ function wireConsumablesUI() {
   const total = (CONS_GROUPS.fw.cap||0) + (CONS_GROUPS.fo.cap||0) + (CONS_GROUPS.oth.cap||0);
   const totalEl = el('cap-cons-total');
   if (totalEl) totalEl.textContent = `Toplam Consumables Kapasite: ${total>0? total.toFixed(1):'-'} m³`;
-  const updateConsVols = () => {
-    const rhoDef = { fw: 1.0, fo: 0.85, oth: 0.90 };
+  const updateConsW = () => {
     const w_fw = parseFloat(el('fw_w')?.value||'')||0;
     const w_fo = parseFloat(el('fo_w')?.value||'')||0;
     const w_ot = parseFloat(el('oth_w')?.value||'')||0;
-    const v_fw = w_fw / (rhoDef.fw||1);
-    const v_fo = w_fo / (rhoDef.fo||1);
-    const v_ot = w_ot / (rhoDef.oth||1);
-    const sum = v_fw + v_fo + v_ot;
-    const elSum = el('cons-volumes');
-    if (elSum) elSum.textContent = `Toplam Consumables Hacim: ${isFinite(sum)? sum.toFixed(1):'-'} m³`;
+    const sum = w_fw + w_fo + w_ot;
+    const elSum = el('cons-tweight');
+    if (elSum) elSum.textContent = `Total Consumables Weight: ${isFinite(sum)? sum.toFixed(1):'-'} t`;
   };
-  ['fw_w','fo_w','oth_w'].forEach(id=>{ const e=el(id); if(e){ e.addEventListener('input', updateConsVols); e.addEventListener('change', updateConsVols);} });
-  updateConsVols();
+  ['fw_w','fo_w','oth_w'].forEach(id=>{ const e=el(id); if(e){ e.addEventListener('input', updateConsW); e.addEventListener('change', updateConsW);} });
+  updateConsW();
 }
 
 function calc() {
@@ -347,6 +350,10 @@ function calc() {
   // Always include light ship if available
   if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number' && window.LIGHT_SHIP.weight > 0) {
     items.push({ name: 'Light Ship', w: window.LIGHT_SHIP.weight, x: (window.LIGHT_SHIP.lcg ?? 0) });
+  }
+  // Include constant weight if provided
+  if (window.CONSTANT_LOAD && typeof window.CONSTANT_LOAD.weight === 'number' && window.CONSTANT_LOAD.weight > 0) {
+    items.push({ name: 'Constant', w: window.CONSTANT_LOAD.weight, x: (window.CONSTANT_LOAD.lcg ?? 0) });
   }
 
   // Totals
@@ -409,7 +416,12 @@ function calc() {
   el('resTm').textContent = fmt(Tmean_m, 3);
   el('resTa').textContent = fmt(Da, 3);
   el('resTf').textContent = fmt(Df, 3);
-  el('resTrim').textContent = fmt(Trim_cm, 1);
+  el('resTrim').textContent = fmt(Trim_m, 2);
+  // Deadweight = total displacement minus light ship weight
+  const lsW = (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number') ? window.LIGHT_SHIP.weight : NaN;
+  const dwt = isFinite(lsW) ? (W - lsW) : NaN;
+  const dwtEl = document.getElementById('resDWT');
+  if (dwtEl) dwtEl.textContent = isFinite(dwt) ? Number(dwt).toFixed(1) : '-';
 }
 
 function clearAll() {
@@ -516,6 +528,7 @@ async function activateShip(id) {
       RHO_REF: s.rho_ref ?? SHIP.RHO_REF,
     };
     window.LIGHT_SHIP = s.light_ship || window.LIGHT_SHIP;
+    window.CONSTANT_LOAD = s.constant || undefined;
     const rows = (profMid.hydrostatics && Array.isArray(profMid.hydrostatics.rows)) ? profMid.hydrostatics.rows : [];
     HYDRO_ROWS = rows.length ? rows.sort((a,b)=>a.draft_m-b.draft_m) : await loadHydroFromJson();
     // Tanks
@@ -1409,6 +1422,7 @@ function bindWizardOnce() {
       RHO_REF: profMid.ship.rho_ref ?? SHIP.RHO_REF,
     };
     window.LIGHT_SHIP = profMid.ship.light_ship || window.LIGHT_SHIP;
+    window.CONSTANT_LOAD = profMid.ship.constant || undefined;
     HYDRO_ROWS = (profMid.hydrostatics.rows||[]).sort((a,b)=>a.draft_m-b.draft_m);
     ACTIVE = {
       cargo: (profMid.tanks.cargo||[]).map(t=>({ id: t.name.replace(/\s+/g,'_'), name: t.name, lcg: Number(t.lcg), cap_m3: t.cap_m3 })),
@@ -1456,11 +1470,15 @@ function buildShipJsonFromWizard() {
   const lswEl = document.getElementById('wiz-ls-w');
   const lsxEl = document.getElementById('wiz-ls-x');
   const longEl = document.getElementById('wiz-longref');
+  const cwEl = document.getElementById('wiz-c-w');
+  const cxEl = document.getElementById('wiz-c-x');
   const lbp = lbpEl ? toNumber(lbpEl.value) : NaN;
   const rho = rhoEl ? toNumber(rhoEl.value) : NaN;
   const lsw = lswEl ? toNumber(lswEl.value) : NaN;
   const lsx = lsxEl ? toNumber(lsxEl.value) : NaN;
   const long_ref = longEl ? String(longEl.value||'').toLowerCase() : undefined;
+  const cw = cwEl ? toNumber(cwEl.value) : NaN;
+  const cx = cxEl ? toNumber(cxEl.value) : NaN;
   const cargo = WIZ.cargo.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const ballast = WIZ.ballast.map(t=>({ name:t.name, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
   const cons = WIZ.cons.map(t=>({ name:t.name, type:t.type, lcg:t.lcg, cap_m3: t.cap_m3!=null? t.cap_m3 : undefined }));
@@ -1479,6 +1497,7 @@ function buildShipJsonFromWizard() {
       rho_ref: isFinite(rho) ? rho : undefined,
       long_ref: long_ref,
       light_ship: (isFinite(lsw) && isFinite(lsx)) ? { weight: lsw, lcg: lsx } : undefined,
+      constant: (isFinite(cw) && isFinite(cx)) ? { weight: cw, lcg: cx } : undefined,
     },
     hydrostatics: { rows: hydro },
     tanks: { cargo, ballast, consumables: cons },
