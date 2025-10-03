@@ -138,13 +138,83 @@ function buildTankInputs(containerId, tanks) {
     cap.textContent = (t.cap_m3 != null) ? `${t.cap_m3} m³` : '-';
     wrap.appendChild(cap);
 
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = '0.1';
-    input.value = '0';
-    input.id = `w_${t.id}`;
-    input.placeholder = 'ağırlık (t)';
-    wrap.appendChild(input);
+    // Controls: %, Volume, Density, Weight with bi-directional sync
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '6px';
+    row.style.flexWrap = 'wrap';
+
+    const pLbl = document.createElement('label');
+    pLbl.textContent = '%';
+    const pInput = document.createElement('input');
+    pInput.type = 'number'; pInput.step = '0.1'; pInput.id = `p_${t.id}`;
+    pInput.placeholder = '%';
+    pLbl.appendChild(pInput);
+    row.appendChild(pLbl);
+
+    const vLbl = document.createElement('label');
+    vLbl.textContent = 'Hacim (m³)';
+    const vInput = document.createElement('input');
+    vInput.type = 'number'; vInput.step = '0.1'; vInput.id = `v_${t.id}`;
+    vInput.placeholder = 'm³';
+    vLbl.appendChild(vInput);
+    row.appendChild(vLbl);
+
+    const rLbl = document.createElement('label');
+    rLbl.textContent = 'Yoğunluk (t/m³)';
+    const rInput = document.createElement('input');
+    rInput.type = 'number'; rInput.step = '0.01'; rInput.id = `r_${t.id}`;
+    rInput.placeholder = (containerId === 'ballast-tanks') ? '1.025' : '0.80';
+    rLbl.appendChild(rInput);
+    row.appendChild(rLbl);
+
+    const wLbl = document.createElement('label');
+    wLbl.textContent = 'Ağırlık (t)';
+    const wInput = document.createElement('input');
+    wInput.type = 'number'; wInput.step = '0.1'; wInput.value = '0';
+    wInput.id = `w_${t.id}`;
+    wInput.placeholder = 'mt';
+    wLbl.appendChild(wInput);
+    row.appendChild(wLbl);
+
+    wrap.appendChild(row);
+
+    // Sync logic per tank
+    const capVal = isFinite(Number(t.cap_m3)) ? Number(t.cap_m3) : 0;
+    const sync = (changed) => {
+      const cap = capVal;
+      let P = parseFloat(pInput.value);
+      let V = parseFloat(vInput.value);
+      let R = parseFloat(rInput.value);
+      let W = parseFloat(wInput.value);
+      P = isFinite(P) ? P : 0;
+      V = isFinite(V) ? V : 0;
+      // Do not coerce R; if NaN, we will skip dependent calcs
+      W = isFinite(W) ? W : 0;
+      if (changed === 'pct') {
+        if (cap > 0) V = cap * (P/100);
+        if (isFinite(R) && R > 0) W = V * R;
+      } else if (changed === 'vol') {
+        if (cap > 0) P = (V / cap) * 100;
+        if (isFinite(R) && R > 0) W = V * R;
+      } else if (changed === 'rho') {
+        if (isFinite(R) && R > 0) W = V * R;
+        if (cap > 0) P = (V / cap) * 100;
+      } else if (changed === 'w') {
+        if (isFinite(R) && R > 0) {
+          V = W / R;
+          if (cap > 0) P = (V / cap) * 100;
+        }
+      }
+      if (isFinite(P)) pInput.value = (P || 0).toFixed(1);
+      if (isFinite(V)) vInput.value = (V || 0).toFixed(1);
+      if (isFinite(W)) wInput.value = (W || 0).toFixed(1);
+    };
+    pInput.addEventListener('input', ()=> sync('pct'));
+    vInput.addEventListener('input', ()=> sync('vol'));
+    rInput.addEventListener('input', ()=> sync('rho'));
+    wInput.addEventListener('input', ()=> sync('w'));
 
     container.appendChild(wrap);
   }
@@ -188,6 +258,9 @@ function wireConsumablesUI() {
   setCap('cap-fw', CONS_GROUPS.fw.cap);
   setCap('cap-fo', CONS_GROUPS.fo.cap);
   setCap('cap-oth', CONS_GROUPS.oth.cap);
+  const total = (CONS_GROUPS.fw.cap||0) + (CONS_GROUPS.fo.cap||0) + (CONS_GROUPS.oth.cap||0);
+  const totalEl = el('cap-cons-total');
+  if (totalEl) totalEl.textContent = `Toplam Consumables Kapasite: ${total>0? total.toFixed(1):'-'} m³`;
 }
 
 function calc() {
