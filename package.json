@@ -4,8 +4,5 @@
   "version": "0.0.0",
   "description": "Vanilla JS single page app with PDF import wizard",
   "license": "UNLICENSED",
-  "scripts": {
-    "ocr:up": "docker build -t ocr ./server/paddleocr && docker run --rm -p 5001:5001 ocr"
-  }
+  "scripts": {}
 }
-
