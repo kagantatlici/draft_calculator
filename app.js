@@ -1243,10 +1243,10 @@ function parseCsvSmart(text) {
     lcg: head.findIndex(h=> /lcg/i.test(h)),
     draft: draftPick ? draftPick.i : head.findIndex(h=> /draft/i.test(h)),
     // Use normalized header tokens to catch dotted forms: T.P.C., M.T.C., L.C.F., L.C.B.
-    tpc: headNorm.findIndex(hn=> /\btpc\b/.test(hn)),
-    mct: headNorm.findIndex(hn=> /(\bmct\b|\bmtc\b)/.test(hn)),
-    lcf: headNorm.findIndex(hn=> /(\blcf\b|\blca\b)/.test(hn)), // treat LCA as LCF
-    lcb: headNorm.findIndex(hn=> /\blcb\b/.test(hn)),
+    tpc: headNorm.findIndex(hn=> /^tpc/.test(hn)),
+    mct: headNorm.findIndex(hn=> /^(mct|mtc)/.test(hn)),
+    lcf: headNorm.findIndex(hn=> /^(lcf|lca)/.test(hn)), // treat LCA as LCF
+    lcb: headNorm.findIndex(hn=> /^lcb/.test(hn)),
     dissw: -1,
   };
   // DIS synonyms on CSV headers (normalized)
