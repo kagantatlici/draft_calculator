@@ -828,6 +828,48 @@ function cleanTankName(s) {
   else if (t.includes(';')) t = t.split(';')[0].trim();
   return t.replace(/^"|"$/g,'');
 }
+// Extract helpers for name normalization
+function extractTankNumber(name){
+  const s = String(name||'');
+  let m = s.match(/\bno\.?\s*(\d+)/i); if (m) return Number(m[1]);
+  m = s.match(/\b(\d{1,3})\b/); if (m) return Number(m[1]);
+  return null;
+}
+function extractTankSide(name){
+  const s = String(name||'');
+  let m = s.match(/\(([PSC])\)/i); if (m) return m[1].toUpperCase();
+  m = s.match(/\b([PSC])\b/i); if (m) return m[1].toUpperCase();
+  return null;
+}
+function isFPTorAPT(name){
+  const s = String(name||'').toLowerCase();
+  return /(\bf\.?p\.?t\b|fore\s*peak|\ba\.?p\.?t\b|after\s*peak)/i.test(s);
+}
+function looksLikeWBT(name){
+  const s = String(name||'');
+  return /(\bw\.?b\.?t\b|\bwb\s*(?:tk|tank)\b|wing\s*ballast)/i.test(s);
+}
+function isSlopOrResidual(name){
+  const s = String(name||'').toLowerCase();
+  return /(slop|residual)/.test(s);
+}
+function normalizeCargoName(name){
+  if (isSlopOrResidual(name)) return name;
+  const n = extractTankNumber(name);
+  if (n==null) return name;
+  const side = extractTankSide(name);
+  return `COT ${n}${side? ' '+side : ''}`;
+}
+function normalizeBallastName(name){
+  if (isFPTorAPT(name)) return name; // keep FPT/APT as-is
+  if (looksLikeWBT(name)){
+    const n = extractTankNumber(name);
+    if (n==null) return name;
+    const side = extractTankSide(name);
+    return `WBT ${n}${side? ' '+side : ''}`;
+  }
+  return name;
+}
 // Name classifier for Ballast-like tanks (accepts digits after tags like WBT1, SWBT2, etc.)
 function isBallastName(name) {
   const raw = String(name||'');
@@ -969,10 +1011,12 @@ async function handleQuickFiles(fileList) {
             const rows = parseHydro(text);
             if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); WIZ_LAST.hydroText = text; added.hydro += rows.length; }
           } else if (kind === 'cargo') {
-            const rows = parseTanksGeneric(text, 'tank');
+            let rows = parseTanksGeneric(text, 'tank');
+            rows = rows.map(r => ({ ...r, name: normalizeCargoName(r.name) }));
             if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
           } else if (kind === 'ballast') {
-            const rows = parseTanksGeneric(text, 'tank');
+            let rows = parseTanksGeneric(text, 'tank');
+            rows = rows.map(r => ({ ...r, name: normalizeBallastName(r.name) }));
             if (rows.length) { WIZ.ballast = (WIZ.ballast||[]).concat(rows); added.ballast += rows.length; }
           } else if (kind === 'cons') {
             const rows = parseTanksGeneric(text, 'cons');
@@ -985,10 +1029,12 @@ async function handleQuickFiles(fileList) {
           const rows = parseHydro(text);
           if (rows.length) { WIZ.hydro = (WIZ.hydro||[]).concat(rows); WIZ_LAST.hydroText = text; added.hydro += rows.length; }
         } else if (kind === 'cargo') {
-          const rows = parseTanksGeneric(text, 'tank');
+          let rows = parseTanksGeneric(text, 'tank');
+          rows = rows.map(r => ({ ...r, name: normalizeCargoName(r.name) }));
           if (rows.length) { WIZ.cargo = (WIZ.cargo||[]).concat(rows); added.cargo += rows.length; }
         } else if (kind === 'ballast') {
-          const rows = parseTanksGeneric(text, 'tank');
+          let rows = parseTanksGeneric(text, 'tank');
+          rows = rows.map(r => ({ ...r, name: normalizeBallastName(r.name) }));
           if (rows.length) { WIZ.ballast = (WIZ.ballast||[]).concat(rows); added.ballast += rows.length; }
         } else if (kind === 'cons') {
           const rows = parseTanksGeneric(text, 'cons');
@@ -1274,10 +1320,11 @@ function parseCsvSmart(text) {
       const name = cleanTankName(cols[idx.name]); if (!name) continue;
       const lcg = toNumber(cols[idx.lcg]); if (!isFinite(lcg)) continue;
       const cap = idx.vol>=0? toNumber(cols[idx.vol]) : undefined;
-      const entry = { name, lcg, cap_m3: isFinite(cap)? cap : undefined };
+      let nm = name;
+      const entry = { name: nm, lcg, cap_m3: isFinite(cap)? cap : undefined };
       const cls = classifyTank(name);
-      if (cls.cat==='cargo') cargo.push(entry);
-      else if (cls.cat==='ballast') ballast.push(entry);
+      if (cls.cat==='cargo') { entry.name = normalizeCargoName(nm); cargo.push(entry); }
+      else if (cls.cat==='ballast') { entry.name = normalizeBallastName(nm); ballast.push(entry); }
       else cons.push({ ...entry, type: cls.type||'other' });
     }
     return { kind:'tanks', cargo, ballast, cons };
@@ -1330,8 +1377,8 @@ function parseCsvSmart(text) {
       const lcg = toNumber(cols[cols.length-1]); if (!isFinite(lcg)) continue;
       const entry = { name, lcg, cap_m3: isFinite(vol)? vol : undefined };
       const cls = classify(name);
-      if (cls.cat==='cargo') cargo.push(entry);
-      else if (cls.cat==='ballast') ballast.push(entry);
+      if (cls.cat==='cargo') { entry.name = normalizeCargoName(entry.name); cargo.push(entry); }
+      else if (cls.cat==='ballast') { entry.name = normalizeBallastName(entry.name); ballast.push(entry); }
       else cons.push({ ...entry, type: cls.type||'fuel' });
     }
     return { kind:'tanks', cargo, ballast, cons };
@@ -1494,7 +1541,9 @@ function bindWizardOnce() {
     const fileIn = document.getElementById(`file-${key}`);
     if (btn) btn.addEventListener('click', ()=>{
       const txt = document.getElementById(`paste-${key}`).value;
-      const rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
+      let rows = parseTanksGeneric(txt, key==='cons'?'cons':'tank');
+      if (key==='cargo') rows = rows.map(r => ({ ...r, name: normalizeCargoName(r.name) }));
+      else if (key==='ballast') rows = rows.map(r => ({ ...r, name: normalizeBallastName(r.name) }));
       // Always append; no 'mevcutlara ekle' checkbox
       WIZ[key] = (WIZ[key] || []).concat(rows);
       const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
@@ -1519,7 +1568,9 @@ function bindWizardOnce() {
         const f = fileIn.files && fileIn.files[0]; if (!f) return;
         const text = await readFileAsText(f);
         WIZ_LAST[`${key}Text`] = text;
-        const rows = parseTanksGeneric(text, key==='cons'?'cons':'tank');
+        let rows = parseTanksGeneric(text, key==='cons'?'cons':'tank');
+        if (key==='cargo') rows = rows.map(r => ({ ...r, name: normalizeCargoName(r.name) }));
+        else if (key==='ballast') rows = rows.map(r => ({ ...r, name: normalizeBallastName(r.name) }));
         // Always append
         WIZ[key] = (WIZ[key] || []).concat(rows);
         const cols = key==='cons' ? ['name','type','lcg','cap_m3'] : ['name','lcg','cap_m3'];
