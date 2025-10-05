@@ -8,6 +8,7 @@ let LAST_TMEAN = null; // remember last mean draft for better iteration start
 let SHIP_ACTIVE = null; // active ship constants (fallback to SHIP)
 let SHIPS_INDEX = null; // available ships list
 let LONG_REF_ACTIVE = 'ms_plus'; // current display/ordering datum
+let WIZ_MANUAL = false; // when true, skip auto reclassification after manual edits
 
 // Local storage keys and helpers
 const LS_PREFIX = 'dc_ship_';
@@ -839,8 +840,10 @@ function isBallastName(name) {
     /\bwing\s*ballast\b/i,
     /\bd\.?b\.?t(?=\b|\d)/i,         // DBT, D.B.T, DBT1
     /double\s*bottom/i,
-    /\bfpt\b|fore\s*peak/i,
-    /\bapt\b|after\s*peak/i,
+    /\bf\s*\.?\s*p\s*\.?\s*t\s*\.?\s*(?:k|tk)?\b/i, // F. P. TK variants
+    /\ba\s*\.?\s*p\s*\.?\s*t\s*\.?\s*(?:k|tk)?\b/i, // A. P. TK variants
+    /fore\s*peak/i,
+    /after\s*peak/i,
     /\bcwt\b/i,
     /\bballast\b/i,
   ];
@@ -1002,15 +1005,17 @@ async function handleQuickFiles(fileList) {
   WIZ.ballast = dedupe(WIZ.ballast);
   WIZ.cons = dedupe(WIZ.cons);
   // Post-fix reclassification: move ballast-like names mistakenly in Cons to Ballast
-  try {
-    const move = [];
-    const stay = [];
-    for (const t of WIZ.cons) { (isBallastName(t.name) ? move : stay).push(t); }
-    if (move.length) {
-      WIZ.cons = stay;
-      WIZ.ballast = dedupe((WIZ.ballast||[]).concat(move.map(({name,lcg,cap_m3})=>({name,lcg,cap_m3}))));
-    }
-  } catch(_) {}
+  if (!WIZ_MANUAL) {
+    try {
+      const move = [];
+      const stay = [];
+      for (const t of WIZ.cons) { (isBallastName(t.name) ? move : stay).push(t); }
+      if (move.length) {
+        WIZ.cons = stay;
+        WIZ.ballast = dedupe((WIZ.ballast||[]).concat(move.map(({name,lcg,cap_m3})=>({name,lcg,cap_m3}))));
+      }
+    } catch(_) {}
+  }
   renderTablePreview('preview-hydro', WIZ.hydro, ['draft_m',{key:'dis_sw',label:'Displacement'},'lcf_m','lcb_m','tpc','mct']);
   renderTablePreview('preview-cargo', WIZ.cargo, ['name','lcg','cap_m3']);
   renderTablePreview('preview-ballast', WIZ.ballast, ['name','lcg','cap_m3']);
@@ -1130,14 +1135,14 @@ function buildMapUITanks(lines, containerId, mode) {
     // Return rows by emitting a custom event
   });
 }
-function parseTanksGeneric(text, mode) {
+  function parseTanksGeneric(text, mode) {
   // mode: 'cargo'|'ballast'|'cons'
   const out = [];
   const lines = normText(text).split(/\r?\n/);
   const typeFromName = (name) => {
     const s = name.toLowerCase();
     if (/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/.test(s) || /(serv|sett|slud|drain|over)/.test(s)) return 'fuel';
-    if (/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/.test(s)) return 'freshwater';
+    if (/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/.test(s) || /\bf\s*\.?\s*w\s*\.?\s*tk\b/.test(s)) return 'freshwater';
     if (/(^|\b)(lo|l\.o\.|lube)(\b|\.)/.test(s) || /cyl\.o|cyl\.?oil|hyd\.o|hydraulic|lubric/.test(s)) return 'lube';
     return 'other';
   };
@@ -1235,12 +1240,12 @@ function parseCsvSmart(text) {
         /\bbwbt\b/i,
         /\bd\.?b\.?t\b/i,                // D.B.T
         /double\s*bottom/i,
-        /\bf\.?p\.?t(?=\b|\d)|fore\s*peak/i,   // FPT or F.P.T or FPT1
-        /\ba\.?p\.?t(?=\b|\d)|after\s*peak/i,  // APT or A.P.T or APT1
+        /\bf\s*\.?\s*p\s*\.?\s*t\s*\.?\s*(?:k|tk)?\b/i, // F. P. TK variants
+        /\ba\s*\.?\s*p\s*\.?\s*t\s*\.?\s*(?:k|tk)?\b/i, // A. P. TK variants
         /\bcwt\b/i,
         /\bballast\b/i
       ],
-      fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b)/i, /potable/i],
+      fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b)/i, /potable/i, /\bf\s*\.?\s*w\s*\.?\s*tk\b/i],
       fuel: [
         // Common fuel acronyms (plain): HFO, HSFO, LSFO, LFO, ULSF, ULSFO, ULFO, HSF, LSF
         /(\b)(hfo|hsfo|lsfo|lfo|ulsf|ulsfo|ulfo|hsf|lsf)(?=\b|\.)/i,
@@ -1293,12 +1298,12 @@ function parseCsvSmart(text) {
         /\bbwbt(?=\b|\d)/i,
         /\bd\.?b\.?t(?=\b|\d)/i,
         /double\s*bottom/i,
-        /\bf\.?p\.?t(?=\b|\d)|fore\s*peak/i,
-        /\ba\.?p\.?t(?=\b|\d)|after\s*peak/i,
+        /\bf\s*\.?\s*p\s*\.?\s*t\s*\.?\s*(?:k|tk)?(?=\b|\d)/i,
+        /\ba\s*\.?\s*p\s*\.?\s*t\s*\.?\s*(?:k|tk)?(?=\b|\d)/i,
         /\bcwt\b/i,
         /\bballast\b/i
       ],
-      fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/i],
+      fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/i, /\bf\s*\.?\s*w\s*\.?\s*tk(?=\b|\d)/i],
       fuel: [
         /(\b)(hfo|hsfo|lsfo|lfo|ulsf|ulsfo|ulfo|hsf|lsf)(?=\b|\.)/i,
         /(?:^|\b)(?:h\.?(?:s\.?)?f\.?(?:o\.?)?|l\.?(?:s\.?)?f\.?(?:o\.?)?|u\.?l\.?(?:s\.?)?f\.?(?:o\.?)?)(?=\b|\.)/i,
@@ -1730,11 +1735,22 @@ function renderEditableTable(containerId, rows, columns, onChange) {
   tbl.className = 'pdf-table';
   const trh = document.createElement('tr');
   for (const c of columns) { const th = document.createElement('th'); th.textContent = c.label; trh.appendChild(th); }
+  // Allow moves between tank categories in program view (not for hydro)
+  const isTankTable = ['prog-cargo','prog-ballast','prog-cons'].includes(containerId);
+  if (isTankTable) { const th = document.createElement('th'); th.textContent = 'Move'; trh.appendChild(th); }
   tbl.appendChild(trh);
   const fmt = (v)=> (v==null? '' : String(v));
   for (let i=0; i<rows.length; i++) {
     const r = rows[i];
     const tr = document.createElement('tr');
+    // DnD support
+    if (isTankTable) {
+      tr.draggable = true;
+      tr.addEventListener('dragstart', (ev)=>{
+        try { ev.dataTransfer.setData('application/json', JSON.stringify({ from: containerId, index: i })); } catch(_) {}
+        ev.dataTransfer.effectAllowed = 'move';
+      });
+    }
     for (const c of columns) {
       const td = document.createElement('td');
       td.contentEditable = 'true';
@@ -1743,9 +1759,29 @@ function renderEditableTable(containerId, rows, columns, onChange) {
         const txt = td.textContent.trim();
         const num = Number(txt);
         r[c.key] = (c.type==='number' ? (isFinite(num)? num : NaN) : txt);
+        WIZ_MANUAL = true;
         if (typeof onChange === 'function') onChange(i, c.key, r[c.key]);
       });
       tr.appendChild(td);
+    }
+    if (isTankTable) {
+      const tdMove = document.createElement('td');
+      const sel = document.createElement('select');
+      const options = [
+        {v:'prog-cargo', t:'Cargo'},
+        {v:'prog-ballast', t:'Ballast'},
+        {v:'prog-cons', t:'Consumables'},
+      ];
+      for (const o of options){ const opt=document.createElement('option'); opt.value=o.v; opt.textContent=o.t; if (o.v===containerId) opt.selected=true; sel.appendChild(opt); }
+      sel.addEventListener('change', ()=>{
+        const to = sel.value;
+        if (to === containerId) return;
+        WIZ_MANUAL = true;
+        moveTankRow(containerId, i, to);
+        updateProgramPreviews();
+      });
+      tdMove.appendChild(sel);
+      tr.appendChild(tdMove);
     }
     tbl.appendChild(tr);
   }
@@ -1760,19 +1796,64 @@ function updateProgramPreviews() {
     { key:'tpc', label:'TPC (t/cm)', type:'number' },
     { key:'mct', label:'MCT1cm (t·m/cm)', type:'number' },
   ];
-  renderEditableTable('prog-hydro', (WIZ.hydro||[]), hydroCols, ()=>{});
+  renderEditableTable('prog-hydro', (WIZ.hydro||[]), hydroCols, ()=>{ WIZ_MANUAL = true; });
   const tankCols = [
     { key:'name', label:'Tank', type:'text' },
     { key:'lcg', label:'LCG (m)', type:'number' },
     { key:'cap_m3', label:'Kapasite (m³)', type:'number' },
   ];
-  renderEditableTable('prog-cargo', (WIZ.cargo||[]), tankCols, ()=>{});
-  renderEditableTable('prog-ballast', (WIZ.ballast||[]), tankCols, ()=>{});
+  renderEditableTable('prog-cargo', (WIZ.cargo||[]), tankCols, ()=>{ WIZ_MANUAL = true; });
+  renderEditableTable('prog-ballast', (WIZ.ballast||[]), tankCols, ()=>{ WIZ_MANUAL = true; });
   const consCols = [
     { key:'name', label:'Tank', type:'text' },
     { key:'type', label:'Tür', type:'text' },
     { key:'lcg', label:'LCG (m)', type:'number' },
     { key:'cap_m3', label:'Kapasite (m³)', type:'number' },
   ];
-  renderEditableTable('prog-cons', (WIZ.cons||[]), consCols, ()=>{});
+  renderEditableTable('prog-cons', (WIZ.cons||[]), consCols, ()=>{ WIZ_MANUAL = true; });
+  // Bind DnD targets (idempotent)
+  ensureDnDBindings();
+}
+
+function moveTankRow(fromId, index, toId) {
+  const mapIdToArr = (id)=> id==='prog-cargo'? 'cargo' : id==='prog-ballast'? 'ballast' : 'cons';
+  const src = mapIdToArr(fromId);
+  const dst = mapIdToArr(toId);
+  let arrSrc = WIZ[src] || [];
+  let arrDst = WIZ[dst] || [];
+  if (index < 0 || index >= arrSrc.length) return;
+  const it = arrSrc[index];
+  arrSrc.splice(index,1);
+  // Normalize shape between categories
+  let toPush;
+  if (dst === 'cons') {
+    toPush = { name: String(it.name||''), type: (it.type||'fuel'), lcg: Number(it.lcg), cap_m3: (isFinite(it.cap_m3)? Number(it.cap_m3): undefined) };
+    if (!toPush.type || !/^(fuel|freshwater|lube|other)$/i.test(String(toPush.type))) toPush.type = 'fuel';
+  } else {
+    toPush = { name: String(it.name||''), lcg: Number(it.lcg), cap_m3: (isFinite(it.cap_m3)? Number(it.cap_m3): undefined) };
+  }
+  arrDst.push(toPush);
+  WIZ[src] = arrSrc; WIZ[dst] = arrDst;
+}
+
+function ensureDnDBindings(){
+  const ids = ['prog-cargo','prog-ballast','prog-cons'];
+  for (const id of ids){
+    const el = document.getElementById(id);
+    if (!el || el.dataset.dndBound==='1') continue;
+    el.addEventListener('dragover', (ev)=>{ ev.preventDefault(); ev.dataTransfer.dropEffect='move'; });
+    el.addEventListener('drop', (ev)=>{
+      ev.preventDefault();
+      try {
+        const data = ev.dataTransfer.getData('application/json');
+        const obj = JSON.parse(data||'{}');
+        if (!obj || !obj.from) return;
+        const from = obj.from; const idx = Number(obj.index);
+        moveTankRow(from, idx, id);
+        WIZ_MANUAL = true;
+        updateProgramPreviews();
+      } catch(_) {}
+    });
+    el.dataset.dndBound = '1';
+  }
 }
