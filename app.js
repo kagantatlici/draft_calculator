@@ -847,7 +847,8 @@ function isFPTorAPT(name){
 }
 function looksLikeWBT(name){
   const s = String(name||'');
-  return /(\bw\.?b\.?t\b|\bwb\s*(?:tk|tank)\b|wing\s*ballast)/i.test(s);
+  // Accept WBT, W.B.T, WB TK/TANK, and dotted TK variants like W.B.TK/WBTK
+  return /(\bw\.?b\.?t\b|\bw\.?b\.?\s*tk\b|\bwb\s*(?:tk|tank)\b|wing\s*ballast)/i.test(s);
 }
 function isSlopOrResidual(name){
   const s = String(name||'').toLowerCase();
