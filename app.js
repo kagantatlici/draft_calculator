@@ -7,6 +7,7 @@ let CONS_GROUPS = { fw:{cap:0, lcg:0}, fo:{cap:0, lcg:0}, oth:{cap:0, lcg:0} };
 let LAST_TMEAN = null; // remember last mean draft for better iteration start
 let SHIP_ACTIVE = null; // active ship constants (fallback to SHIP)
 let SHIPS_INDEX = null; // available ships list
+let LONG_REF_ACTIVE = 'ms_plus'; // current display/ordering datum
 
 // Local storage keys and helpers
 const LS_PREFIX = 'dc_ship_';
@@ -46,6 +47,18 @@ function convertLongitudinalToMidship(x, lbp, ref) {
   // Convert: x_mid = x_fp + lbp/2
   if (r === 'fp_minus') return x + lbp/2;
   return x; // assume already midship-based
+}
+
+// Convert midship-based coordinate back to a given reference (for display/ordering)
+function convertMidshipToRef(xMid, lbp, ref) {
+  const r = String(ref||'').toLowerCase();
+  if (!isFinite(xMid)) return xMid;
+  if (r === 'ms_plus') return xMid;
+  if (r === 'ms_minus') return -xMid;
+  if (!isFinite(lbp) || lbp <= 0) return xMid;
+  if (r === 'ap_plus') return xMid + lbp/2;
+  if (r === 'fp_minus') return xMid - lbp/2;
+  return xMid;
 }
 
 function convertProfileLongitudes(profile) {
@@ -210,7 +223,17 @@ function buildTankInputs(containerId, tanks) {
   const hRho = document.createElement('div'); hRho.className = 'muted'; hRho.textContent = 'ρ (t/m³)'; head.appendChild(hRho);
   const hW = document.createElement('div'); hW.className = 'muted'; hW.textContent = 'Ağırlık (t)'; head.appendChild(hW);
   container.appendChild(head);
-  for (const t of tanks) {
+  const lbpSort = (SHIP_ACTIVE?.LBP ?? SHIP.LBP);
+  const refSort = (LONG_REF_ACTIVE || 'ms_plus').toLowerCase();
+  const desc = (refSort === 'ms_minus') ? false : true;
+  const ordered = [...tanks].sort((a,b)=>{
+    const av = convertMidshipToRef(Number(a?.lcg), lbpSort, refSort);
+    const bv = convertMidshipToRef(Number(b?.lcg), lbpSort, refSort);
+    const aa = Number.isFinite(av) ? av : -Infinity;
+    const bb = Number.isFinite(bv) ? bv : -Infinity;
+    return desc ? (bb - aa) : (aa - bb); // order by chosen datum
+  });
+  for (const t of ordered) {
     const wrap = document.createElement('div');
     wrap.className = 'tank';
 
@@ -564,6 +587,7 @@ async function activateShip(id) {
     // Convert LCF/LCB/LCG to midship-based if profile specifies a longitudinal datum
     const profMid = convertProfileLongitudes(JSON.parse(JSON.stringify(profile)));
     const s = profMid.ship;
+    LONG_REF_ACTIVE = (s.long_ref || 'ms_plus');
     SHIP_ACTIVE = {
       LBP: s.lbp ?? SHIP.LBP,
       LCF: SHIP.LCF, // base until per-ship static overrides provided
@@ -1156,19 +1180,25 @@ function parseCsvSmart(text) {
   const delim = guessDelim(lines);
   const head = splitLine(lines[0], delim).map(h=> String(h||'').trim());
   const norm = s=> s.toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const headNorm = head.map(h => norm(h));
+  // Helper to prefer specific variants
+  const pickFirst = (arr, pred) => { for (const it of arr) if (pred(it)) return it; return arr[0]; };
+  // Draft: prefer DRAFT (MLD.) over others if present
+  const draftCands = head.map((h,i)=>({i,raw:h,norm:headNorm[i]})).filter(o=> /draft/i.test(o.raw) || /draft/.test(o.norm));
+  const draftPick = draftCands.length ? pickFirst(draftCands, o=> /mld/i.test(o.raw) || /mld/.test(o.norm)) : null;
   const idx = {
     name: head.findIndex(h=> /^(tank|name)/i.test(h) || /tankname/i.test(norm(h)) || norm(h)==='name' ),
     vol: head.findIndex(h=> /(vol|volume|cap|capacity)/i.test(h) || /m3|m²|m³/.test(h) ),
     lcg: head.findIndex(h=> /lcg/i.test(h)),
-    draft: head.findIndex(h=> /draft/i.test(h)),
-    tpc: head.findIndex(h=> /tpc/i.test(h)),
-    mct: head.findIndex(h=> /(mct|mtc)/i.test(h)),
-    lcf: head.findIndex(h=> /(lcf|lca)/i.test(h)), // treat LCA as LCF
-    lcb: head.findIndex(h=> /lcb/i.test(h)),
+    draft: draftPick ? draftPick.i : head.findIndex(h=> /draft/i.test(h)),
+    // Use normalized header tokens to catch dotted forms: T.P.C., M.T.C., L.C.F., L.C.B.
+    tpc: headNorm.findIndex(hn=> /\btpc\b/.test(hn)),
+    mct: headNorm.findIndex(hn=> /(\bmct\b|\bmtc\b)/.test(hn)),
+    lcf: headNorm.findIndex(hn=> /(\blcf\b|\blca\b)/.test(hn)), // treat LCA as LCF
+    lcb: headNorm.findIndex(hn=> /\blcb\b/.test(hn)),
     dissw: -1,
   };
-  // DIS synonyms on CSV headers
-  const headNorm = head.map(h => norm(h));
+  // DIS synonyms on CSV headers (normalized)
   for (let i=0;i<headNorm.length;i++){
     const hn = headNorm[i];
     const hasDis = /(displacement|displ|displt|disp|^dis$)/.test(hn) || /^dis[a-z]*$/.test(hn);
@@ -1177,7 +1207,7 @@ function parseCsvSmart(text) {
     if (idx.dissw < 0 && (/(dis\(sw\)|dissw)/.test(hn) || (hasDis && isSW) || (hasDis && !isFW && !isSW))) idx.dissw = i; // generic → SW
   }
   // generic now routed to SW
-  const hasHydro = idx.draft>=0 && (idx.tpc>=0 || idx.mct>=0);
+  const hasHydro = (idx.draft>=0) && (idx.tpc>=0 || idx.mct>=0 || idx.lcf>=0 || idx.lcb>=0);
   if (hasHydro) {
     const rows=[];
     for (let i=1;i<lines.length;i++){
@@ -1198,19 +1228,28 @@ function parseCsvSmart(text) {
       // Ballast patterns expanded
       ballast: [
         /\bw\.?b\.?t\b/i,                // W.B.T or WBT
-        /\bwb\s*(?:tk|tank)\b/i,         // WB TK or WB TANK
+        /\bwb\s*(?:tk|tank)\b/i,         // WB TK or WB TANK (also matches WBTK)
+        /\bw\.?b\.?\s*tk\b/i,           // W.B.TK or WB.TK or W B TK
         /\bwing\s*ballast\b/i,
         /\bswbt\b/i,
         /\bbwbt\b/i,
         /\bd\.?b\.?t\b/i,                // D.B.T
         /double\s*bottom/i,
-        /\bfpt\b|fore\s*peak/i,
-        /\bapt\b|after\s*peak/i,
+        /\bf\.?p\.?t(?=\b|\d)|fore\s*peak/i,   // FPT or F.P.T or FPT1
+        /\ba\.?p\.?t(?=\b|\d)|after\s*peak/i,  // APT or A.P.T or APT1
         /\bcwt\b/i,
         /\bballast\b/i
       ],
       fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b)/i, /potable/i],
-      fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
+      fuel: [
+        // Common fuel acronyms (plain): HFO, HSFO, LSFO, LFO, ULSF, ULSFO, ULFO, HSF, LSF
+        /(\b)(hfo|hsfo|lsfo|lfo|ulsf|ulsfo|ulfo|hsf|lsf)(?=\b|\.)/i,
+        // Dotted variants: H.S.F.O., L.S.F.O., U.L.S.F.O., U.L.F.O., H.S.F., L.S.F., L.F.O., H.F.O.
+        /(?:^|\b)(?:h\.?(?:s\.?)?f\.?(?:o\.?)?|l\.?(?:s\.?)?f\.?(?:o\.?)?|u\.?l\.?(?:s\.?)?f\.?(?:o\.?)?)(?=\b|\.)/i,
+        // Other fuels and keywords
+        /(^|\b)(fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i,
+        /(serv|sett|slud|drain|over)/i
+      ],
       lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil/i, /hyd\.o|hydraulic/i, /lubric/i]
     };
     const classifyTank = (name)=>{
@@ -1248,18 +1287,24 @@ function parseCsvSmart(text) {
       ballast: [
         /\bw\.?b\.?t(?=\b|\d)/i,
         /\bwb\s*(?:tk|tank)\b/i,
+        /\bw\.?b\.?\s*tk(?=\b|\d)/i,
         /\bwing\s*ballast\b/i,
         /\bswbt(?=\b|\d)/i,
         /\bbwbt(?=\b|\d)/i,
         /\bd\.?b\.?t(?=\b|\d)/i,
         /double\s*bottom/i,
-        /\bfpt\b|fore\s*peak/i,
-        /\bapt\b|after\s*peak/i,
+        /\bf\.?p\.?t(?=\b|\d)|fore\s*peak/i,
+        /\ba\.?p\.?t(?=\b|\d)|after\s*peak/i,
         /\bcwt\b/i,
         /\bballast\b/i
       ],
       fw: [/(fresh\s*water|^fw\b|f\.w\.|fwt\b|potable)/i],
-      fuel: [/(^|\b)(hfo|fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i, /(serv|sett|slud|drain|over)/i],
+      fuel: [
+        /(\b)(hfo|hsfo|lsfo|lfo|ulsf|ulsfo|ulfo|hsf|lsf)(?=\b|\.)/i,
+        /(?:^|\b)(?:h\.?(?:s\.?)?f\.?(?:o\.?)?|l\.?(?:s\.?)?f\.?(?:o\.?)?|u\.?l\.?(?:s\.?)?f\.?(?:o\.?)?)(?=\b|\.)/i,
+        /(^|\b)(fo|f\.o\.|mdo|mgo|do|d\.o\.|diesel|bunker)(\b|\.)/i,
+        /(serv|sett|slud|drain|over)/i
+      ],
       lube: [/(^|\b)(lo|l\.o\.|lube)(\b|\.)/i, /cyl\.o|cyl\.?oil|hyd\.o|hydraulic|lubric/i]
     };
     const classify = (name)=>{
@@ -1522,6 +1567,7 @@ function bindWizardOnce() {
     setActiveShipID(js.ship.id);
     // Convert profile longitudes to midship-based using wizard datum before activating
     const profMid = convertProfileLongitudes(JSON.parse(JSON.stringify(js)));
+    LONG_REF_ACTIVE = (profMid.ship.long_ref || 'ms_plus');
     // Activate in-memory without saving to server
     SHIP_ACTIVE = {
       LBP: profMid.ship.lbp ?? SHIP.LBP,
