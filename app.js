@@ -10,6 +10,7 @@ let SHIPS_INDEX = null; // available ships list
 let LONG_REF_ACTIVE = 'ms_plus'; // current display/ordering datum
 let WIZ_MANUAL = false; // when true, skip auto reclassification after manual edits
 
+
 // Local storage keys and helpers
 const LS_PREFIX = 'dc_ship_';
 const LS_INDEX_KEY = 'dc_ships_index';
@@ -192,6 +193,29 @@ function fmt(n, digits = 3) {
   return Number(n).toFixed(digits);
 }
 
+// Update hint under Constant L.C.G. according to active ship datum
+function updateConstLCGHint() {
+  const elHint = document.getElementById('const-hint');
+  if (!elHint) return;
+  const base = SHIP_ACTIVE || SHIP;
+  const lbp = Number(base.LBP || SHIP.LBP || 0);
+  const ref = String(LONG_REF_ACTIVE || 'ms_plus').toLowerCase();
+  const f = (x)=> (isFinite(x)? (Math.round(x*100)/100).toFixed(2) : '-');
+  let text = '';
+  if (ref === 'ms_plus') {
+    text = `Reference: midship (+ forward). Examples: 0.00 at MS, +${f(lbp/2)} at FP, -${f(lbp/2)} at AP.`;
+  } else if (ref === 'ms_minus') {
+    text = `Reference: midship (− forward). Examples: 0.00 at MS, +${f(lbp/2)} at AP, -${f(lbp/2)} at FP.`;
+  } else if (ref === 'ap_plus') {
+    text = `Reference: AP (+ forward). Examples: 0.00 at AP, +${f(lbp)} at FP.`;
+  } else if (ref === 'fp_minus') {
+    text = `Reference: FP (− aft). Examples: 0.00 at FP, -${f(lbp)} at AP.`;
+  } else {
+    text = `Reference: midship (+ forward).`;
+  }
+  elHint.textContent = text;
+}
+
 function renderConstants() {
   const box = document.getElementById('consts-list');
   if (!box) return;
@@ -275,6 +299,11 @@ function buildTankInputs(containerId, tanks) {
     const capVal = isFinite(Number(t.cap_m3)) ? Number(t.cap_m3) : 0;
     const sync = (changed) => {
       const cap = capVal;
+      // normalize decimal separator to dot
+      pInput.value = String(pInput.value||'').replace(',', '.');
+      vInput.value = String(vInput.value||'').replace(',', '.');
+      rInput.value = String(rInput.value||'').replace(',', '.');
+      wInput.value = String(wInput.value||'').replace(',', '.');
       let P = parseFloat(pInput.value);
       let V = parseFloat(vInput.value);
       let R = parseFloat(rInput.value);
@@ -398,9 +427,13 @@ function wireConsumablesUI() {
   const totalEl = el('cap-cons-total');
   if (totalEl) totalEl.textContent = `Toplam Consumables Kapasite: ${total>0? total.toFixed(1):'-'} m³`;
   const updateConsW = () => {
-    const w_fw = parseFloat(el('fw_w')?.value||'')||0;
-    const w_fo = parseFloat(el('fo_w')?.value||'')||0;
-    const w_ot = parseFloat(el('oth_w')?.value||'')||0;
+    const fw = el('fw_w'), fo = el('fo_w'), ot = el('oth_w');
+    if (fw) fw.value = String(fw.value||'').replace(',', '.');
+    if (fo) fo.value = String(fo.value||'').replace(',', '.');
+    if (ot) ot.value = String(ot.value||'').replace(',', '.');
+    const w_fw = parseFloat(fw?.value||'')||0;
+    const w_fo = parseFloat(fo?.value||'')||0;
+    const w_ot = parseFloat(ot?.value||'')||0;
     const sum = w_fw + w_fo + w_ot;
     const elSum = el('cons-tweight');
     if (elSum) elSum.textContent = `Total Consumables Weight: ${isFinite(sum)? sum.toFixed(1):'-'} t`;
@@ -411,7 +444,8 @@ function wireConsumablesUI() {
 
 function calc() {
   const base = SHIP_ACTIVE || SHIP;
-  const rho = parseFloat(el('rho').value || String(base.RHO_REF || 1.025)) || (base.RHO_REF || 1.025);
+  const rhoEl = el('rho'); if (rhoEl) rhoEl.value = String(rhoEl.value||'').replace(',', '.');
+  const rho = parseFloat(rhoEl?.value || String(base.RHO_REF || 1.025)) || (base.RHO_REF || 1.025);
   // Read consumables groups as separate masses at their average LCGs
   if (!CONS_GROUPS || !CONS_GROUPS.fw) CONS_GROUPS = getConsGroupsFromTanks();
 
@@ -433,12 +467,27 @@ function calc() {
   if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number' && window.LIGHT_SHIP.weight > 0) {
     items.push({ name: 'Light Ship', w: window.LIGHT_SHIP.weight, x: (window.LIGHT_SHIP.lcg ?? 0) });
   }
-  // Include constant weight from main UI if provided, otherwise fallback to per-ship constant
-  const uiConstW = parseFloat(el('const_w')?.value || '');
-  const uiConstX = parseFloat(el('const_x')?.value || '');
-  if (isFinite(uiConstW) && isFinite(uiConstX) && uiConstW !== 0) {
-    items.push({ name: 'Constant', w: uiConstW, x: uiConstX });
-  } else if (window.CONSTANT_LOAD && typeof window.CONSTANT_LOAD.weight === 'number' && window.CONSTANT_LOAD.weight > 0) {
+  // Include constant weight from main UI if provided (UI overrides profile). If UI w===0 → disable constant.
+  const cwEl = el('const_w'); const cxEl = el('const_x');
+  const cwRaw = cwEl ? String(cwEl.value||'').trim() : '';
+  const cxRaw = cxEl ? String(cxEl.value||'').trim() : '';
+  let usedUIConst = false;
+  if (cwRaw !== '' || cxRaw !== '') {
+    if (cwEl) cwEl.value = cwRaw.replace(',', '.');
+    if (cxEl) cxEl.value = cxRaw.replace(',', '.');
+    const uiW = parseFloat(cwEl?.value || '');
+    const uiX = parseFloat(cxEl?.value || '');
+    if (isFinite(uiW) && isFinite(uiX)) {
+      usedUIConst = true;
+      if (uiW > 0) {
+        // Convert UI X from current datum to midship-based coordinate
+        const xMid = convertLongitudinalToMidship(uiX, base.LBP, LONG_REF_ACTIVE);
+        items.push({ name: 'Constant', w: uiW, x: xMid });
+      }
+      // if uiW === 0, explicitly disable constant (no fallback)
+    }
+  }
+  if (!usedUIConst && window.CONSTANT_LOAD && typeof window.CONSTANT_LOAD.weight === 'number' && window.CONSTANT_LOAD.weight > 0) {
     items.push({ name: 'Constant', w: window.CONSTANT_LOAD.weight, x: (window.CONSTANT_LOAD.lcg ?? 0) });
   }
 
@@ -654,11 +703,12 @@ async function activateShip(id) {
     CONS_TANKS = await loadConsumablesFromJson();
   }
   // Rebuild UI
-  buildTankInputs('cargo-tanks', ACTIVE.cargo);
-  buildTankInputs('ballast-tanks', ACTIVE.ballast);
-  renderConstants();
-  wireConsumablesUI();
-}
+    buildTankInputs('cargo-tanks', ACTIVE.cargo);
+    buildTankInputs('ballast-tanks', ACTIVE.ballast);
+    renderConstants();
+    wireConsumablesUI();
+    updateConstLCGHint();
+  }
 }
 
 function populateShipDropdown(ships) {
@@ -691,6 +741,7 @@ function populateShipDropdown(ships) {
     buildTankInputs('ballast-tanks', ACTIVE.ballast);
     renderConstants();
     wireConsumablesUI();
+    updateConstLCGHint();
   }
 })();
 
@@ -1713,6 +1764,7 @@ function bindWizardOnce() {
     buildTankInputs('cargo-tanks', ACTIVE.cargo);
     buildTankInputs('ballast-tanks', ACTIVE.ballast);
     renderConstants();
+    updateConstLCGHint();
     // Update ship list dropdown with the new ship and select it
     try {
       if (!Array.isArray(SHIPS_INDEX)) SHIPS_INDEX = [];
@@ -1860,7 +1912,14 @@ function renderEditableTable(containerId, rows, columns, onChange) {
   const isTankTable = ['prog-cargo','prog-ballast','prog-cons'].includes(containerId);
   if (isTankTable) { const th = document.createElement('th'); th.textContent = 'Move'; trh.appendChild(th); }
   tbl.appendChild(trh);
-  const fmt = (v)=> (v==null? '' : String(v));
+  const fmt = (v, type)=> {
+    if (v==null) return '';
+    if (type==='number') {
+      const n = Number(String(v).replace(',', '.'));
+      return Number.isFinite(n) ? n.toFixed(3) : '';
+    }
+    return String(v);
+  };
   for (let i=0; i<rows.length; i++) {
     const r = rows[i];
     const tr = document.createElement('tr');
@@ -1888,11 +1947,17 @@ function renderEditableTable(containerId, rows, columns, onChange) {
         td.appendChild(sel);
       } else {
         td.contentEditable = 'true';
-        td.textContent = fmt(r[c.key]);
+        td.textContent = fmt(r[c.key], c.type);
         td.addEventListener('blur', ()=>{
-          const txt = td.textContent.trim();
+          const txtRaw = td.textContent.trim();
+          const txt = txtRaw.replace(',', '.');
           const num = Number(txt);
-          r[c.key] = (c.type==='number' ? (isFinite(num)? num : NaN) : txt);
+          if (c.type==='number') {
+            r[c.key] = (Number.isFinite(num)? Number(num.toFixed(3)) : NaN);
+            td.textContent = Number.isFinite(num) ? num.toFixed(3) : '';
+          } else {
+            r[c.key] = txtRaw;
+          }
           WIZ_MANUAL = true;
           if (typeof onChange === 'function') onChange(i, c.key, r[c.key]);
         });
