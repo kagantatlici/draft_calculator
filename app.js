@@ -220,9 +220,9 @@ function buildTankInputs(containerId, tanks) {
   const hName = document.createElement('div'); hName.className = 'name'; hName.textContent = 'Tank'; head.appendChild(hName);
   const hCap = document.createElement('div'); hCap.className = 'cap'; hCap.textContent = 'Cap (m³)'; head.appendChild(hCap);
   const hPct = document.createElement('div'); hPct.className = 'muted'; hPct.textContent = '%'; head.appendChild(hPct);
-  const hVol = document.createElement('div'); hVol.className = 'muted'; hVol.textContent = 'Hacim (m³)'; head.appendChild(hVol);
-  const hRho = document.createElement('div'); hRho.className = 'muted'; hRho.textContent = 'ρ (t/m³)'; head.appendChild(hRho);
-  const hW = document.createElement('div'); hW.className = 'muted'; hW.textContent = 'Ağırlık (t)'; head.appendChild(hW);
+  const hVol = document.createElement('div'); hVol.className = 'muted'; hVol.textContent = 'Volume (m³)'; head.appendChild(hVol);
+  const hRho = document.createElement('div'); hRho.className = 'muted'; hRho.textContent = 'Density (g/cm³)'; head.appendChild(hRho);
+  const hW = document.createElement('div'); hW.className = 'muted'; hW.textContent = 'Weight (t)'; head.appendChild(hW);
   container.appendChild(head);
   const lbpSort = (SHIP_ACTIVE?.LBP ?? SHIP.LBP);
   const refSort = (LONG_REF_ACTIVE || 'ms_plus').toLowerCase();
@@ -234,7 +234,8 @@ function buildTankInputs(containerId, tanks) {
     const bb = Number.isFinite(bv) ? bv : -Infinity;
     return desc ? (bb - aa) : (aa - bb); // order by chosen datum
   });
-  for (const t of ordered) {
+  for (let rowIndex = 0; rowIndex < ordered.length; rowIndex++) {
+    const t = ordered[rowIndex];
     const wrap = document.createElement('div');
     wrap.className = 'tank';
 
@@ -252,18 +253,22 @@ function buildTankInputs(containerId, tanks) {
     // Inputs as grid columns to keep single-line layout
     const pInput = document.createElement('input');
     pInput.type = 'number'; pInput.step = '0.1'; pInput.id = `p_${t.id}`; pInput.placeholder = '%'; pInput.setAttribute('aria-label','Yüzde');
+    pInput.dataset.col = 'pct'; pInput.dataset.row = String(rowIndex); pInput.dataset.container = containerId;
     wrap.appendChild(pInput);
 
     const vInput = document.createElement('input');
     vInput.type = 'number'; vInput.step = '0.1'; vInput.id = `v_${t.id}`; vInput.placeholder = 'm³'; vInput.setAttribute('aria-label','Hacim');
+    vInput.dataset.col = 'vol'; vInput.dataset.row = String(rowIndex); vInput.dataset.container = containerId;
     wrap.appendChild(vInput);
 
     const rInput = document.createElement('input');
     rInput.type = 'number'; rInput.step = '0.01'; rInput.id = `r_${t.id}`; rInput.placeholder = (containerId === 'ballast-tanks') ? '1.025' : '0.80'; rInput.setAttribute('aria-label','Yoğunluk');
+    rInput.dataset.col = 'rho'; rInput.dataset.row = String(rowIndex); rInput.dataset.container = containerId;
     wrap.appendChild(rInput);
 
     const wInput = document.createElement('input');
     wInput.type = 'number'; wInput.step = '0.1'; wInput.value = '0'; wInput.id = `w_${t.id}`; wInput.placeholder = 'mt'; wInput.setAttribute('aria-label','Ağırlık');
+    wInput.dataset.col = 'w'; wInput.dataset.row = String(rowIndex); wInput.dataset.container = containerId;
     wrap.appendChild(wInput);
 
     // Sync logic per tank
@@ -293,15 +298,36 @@ function buildTankInputs(containerId, tanks) {
           if (cap > 0) P = (V / cap) * 100;
         }
       }
-      if (isFinite(P)) pInput.value = (P || 0).toFixed(1);
-      if (isFinite(V)) vInput.value = (V || 0).toFixed(1);
-      if (isFinite(W)) wInput.value = (W || 0).toFixed(1);
+      // Avoid reformatting the field the user is actively typing in to allow multi-digit entry
+      if (isFinite(P) && changed !== 'pct') pInput.value = (P || 0).toFixed(1);
+      if (isFinite(V) && changed !== 'vol') vInput.value = (V || 0).toFixed(1);
+      if (isFinite(W) && changed !== 'w') wInput.value = (W || 0).toFixed(1);
       updateTankTotals(containerId, tanks);
     };
     pInput.addEventListener('input', ()=> sync('pct'));
     vInput.addEventListener('input', ()=> sync('vol'));
     rInput.addEventListener('input', ()=> sync('rho'));
     wInput.addEventListener('input', ()=> sync('w'));
+
+    // Column-wise Tab navigation: move focus to next/previous row within the same column
+    const handleTabNav = (ev) => {
+      if (ev.key !== 'Tab') return;
+      const col = ev.currentTarget.dataset.col;
+      const row = Number(ev.currentTarget.dataset.row || '0');
+      const dir = ev.shiftKey ? -1 : 1;
+      const nextRow = row + dir;
+      const parent = container; // scope within the same list (cargo/ballast)
+      const next = parent.querySelector(`input[data-col="${col}"][data-row="${nextRow}"]`);
+      if (next) {
+        ev.preventDefault();
+        next.focus();
+        try { next.select && next.select(); } catch(_){}
+      }
+    };
+    pInput.addEventListener('keydown', handleTabNav);
+    vInput.addEventListener('keydown', handleTabNav);
+    rInput.addEventListener('keydown', handleTabNav);
+    wInput.addEventListener('keydown', handleTabNav);
 
     container.appendChild(wrap);
   }
@@ -407,8 +433,12 @@ function calc() {
   if (window.LIGHT_SHIP && typeof window.LIGHT_SHIP.weight === 'number' && window.LIGHT_SHIP.weight > 0) {
     items.push({ name: 'Light Ship', w: window.LIGHT_SHIP.weight, x: (window.LIGHT_SHIP.lcg ?? 0) });
   }
-  // Include constant weight if provided
-  if (window.CONSTANT_LOAD && typeof window.CONSTANT_LOAD.weight === 'number' && window.CONSTANT_LOAD.weight > 0) {
+  // Include constant weight from main UI if provided, otherwise fallback to per-ship constant
+  const uiConstW = parseFloat(el('const_w')?.value || '');
+  const uiConstX = parseFloat(el('const_x')?.value || '');
+  if (isFinite(uiConstW) && isFinite(uiConstX) && uiConstW !== 0) {
+    items.push({ name: 'Constant', w: uiConstW, x: uiConstX });
+  } else if (window.CONSTANT_LOAD && typeof window.CONSTANT_LOAD.weight === 'number' && window.CONSTANT_LOAD.weight > 0) {
     items.push({ name: 'Constant', w: window.CONSTANT_LOAD.weight, x: (window.CONSTANT_LOAD.lcg ?? 0) });
   }
 
@@ -478,11 +508,15 @@ function calc() {
   const dwt = isFinite(lsW) ? (W - lsW) : NaN;
   const dwtEl = document.getElementById('resDWT');
   if (dwtEl) dwtEl.textContent = isFinite(dwt) ? Number(dwt).toFixed(1) : '-';
+  const dwtEl2 = document.getElementById('resDWTNote');
+  if (dwtEl2) dwtEl2.textContent = isFinite(dwt) ? Number(dwt).toFixed(1) : '-';
 }
 
 function clearAll() {
   const base = SHIP_ACTIVE || SHIP;
   el('rho').value = String(base.RHO_REF || 1.025);
+  const cW = el('const_w'); if (cW) cW.value = '';
+  const cX = el('const_x'); if (cX) cX.value = '';
   ['fw','fo','oth'].forEach(k=>{
     const set=(id,val)=>{ const e=el(id); if(e) e.value = val; };
     set(k+'_w','');
@@ -631,7 +665,7 @@ function populateShipDropdown(ships) {
   const sel = document.getElementById('ship-select');
   if (!sel) return;
   sel.innerHTML = '';
-  const ph = document.createElement('option'); ph.value = ''; ph.textContent = 'gemi seç'; sel.appendChild(ph);
+  const ph = document.createElement('option'); ph.value = ''; ph.textContent = 'Select Ship'; sel.appendChild(ph);
   for (const s of ships) {
     const opt = document.createElement('option');
     opt.value = s.id; opt.textContent = s.name;
@@ -738,6 +772,7 @@ let WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
 let WIZ_LAST = { hydroText: '', cargoText: '', ballastText: '', consText: '' };
 let WIZ_BOUND = false;
 let OPEN_BUSY = false; // prevent multi-open race (Chrome double listeners, etc.)
+let WIZ_EDIT_MODE = false; // wizard opened for editing an existing ship
 
 function showWizard() {
   const ov = document.getElementById('wizard-overlay');
@@ -779,6 +814,40 @@ function updateWizStatus() {
   updateProgramPreviews();
 }
 if (addShipBtn) addShipBtn.addEventListener('click', showWizard);
+
+// Open wizard in edit mode with the selected ship's profile preloaded
+async function openWizardForEdit() {
+  const sel = document.getElementById('ship-select');
+  const id = sel && sel.value;
+  if (!id) { alert('Select a ship first.'); return; }
+  const profile = await loadShipProfile(id);
+  if (!profile || !profile.ship) { alert('Could not load ship profile.'); return; }
+  const profMid = convertProfileLongitudes(JSON.parse(JSON.stringify(profile)));
+  // Reset WIZ buffers
+  WIZ = { hydro: [], cargo: [], ballast: [], cons: [] };
+  WIZ_LAST = { hydroText: '', cargoText: '', ballastText: '', consText: '' };
+  // Fill basics
+  try {
+    const s = profMid.ship || {};
+    const setVal = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = (v==null? '' : String(v)); };
+    setVal('wiz-name', s.name || s.id || '');
+    setVal('wiz-lbp', isFinite(s.lbp)? s.lbp : '');
+    setVal('wiz-rho', isFinite(s.rho_ref)? s.rho_ref : '');
+    const le = document.getElementById('wiz-longref'); if (le) le.value = (s.long_ref||'ms_plus');
+    if (s.light_ship && isFinite(s.light_ship.weight)) setVal('wiz-ls-w', s.light_ship.weight);
+    if (s.light_ship && isFinite(s.light_ship.lcg)) setVal('wiz-ls-x', s.light_ship.lcg);
+  } catch(_){}
+  // Fill lists
+  try { WIZ.hydro = Array.isArray(profMid.hydrostatics?.rows) ? profMid.hydrostatics.rows.slice() : []; } catch(_){}
+  try { WIZ.cargo = Array.isArray(profMid.tanks?.cargo) ? profMid.tanks.cargo.slice() : []; } catch(_){}
+  try { WIZ.ballast = Array.isArray(profMid.tanks?.ballast) ? profMid.tanks.ballast.slice() : []; } catch(_){}
+  try { WIZ.cons = Array.isArray(profMid.tanks?.consumables) ? profMid.tanks.consumables.slice() : []; } catch(_){}
+  WIZ_EDIT_MODE = true;
+  showWizard();
+  updateProgramPreviews();
+}
+const editBtn = document.getElementById('edit-ship');
+if (editBtn) editBtn.addEventListener('click', openWizardForEdit);
 
 // Helpers for parsing
 function detectDelimiter(line) {
@@ -1805,15 +1874,29 @@ function renderEditableTable(containerId, rows, columns, onChange) {
     }
     for (const c of columns) {
       const td = document.createElement('td');
-      td.contentEditable = 'true';
-      td.textContent = fmt(r[c.key]);
-      td.addEventListener('blur', ()=>{
-        const txt = td.textContent.trim();
-        const num = Number(txt);
-        r[c.key] = (c.type==='number' ? (isFinite(num)? num : NaN) : txt);
-        WIZ_MANUAL = true;
-        if (typeof onChange === 'function') onChange(i, c.key, r[c.key]);
-      });
+      const isSelect = c.editor === 'select' && Array.isArray(c.options);
+      if (isSelect) {
+        const sel = document.createElement('select');
+        for (const opt of c.options){ const o=document.createElement('option'); o.value=opt; o.textContent=opt; sel.appendChild(o); }
+        const cur = String(r[c.key]||'').toLowerCase();
+        sel.value = c.options.includes(cur)? cur : c.options[0];
+        sel.addEventListener('change', ()=>{
+          r[c.key] = sel.value;
+          WIZ_MANUAL = true;
+          if (typeof onChange === 'function') onChange(i, c.key, r[c.key]);
+        });
+        td.appendChild(sel);
+      } else {
+        td.contentEditable = 'true';
+        td.textContent = fmt(r[c.key]);
+        td.addEventListener('blur', ()=>{
+          const txt = td.textContent.trim();
+          const num = Number(txt);
+          r[c.key] = (c.type==='number' ? (isFinite(num)? num : NaN) : txt);
+          WIZ_MANUAL = true;
+          if (typeof onChange === 'function') onChange(i, c.key, r[c.key]);
+        });
+      }
       tr.appendChild(td);
     }
     if (isTankTable) {
@@ -1858,7 +1941,7 @@ function updateProgramPreviews() {
   renderEditableTable('prog-ballast', (WIZ.ballast||[]), tankCols, ()=>{ WIZ_MANUAL = true; });
   const consCols = [
     { key:'name', label:'Tank', type:'text' },
-    { key:'type', label:'Tür', type:'text' },
+    { key:'type', label:'Type', type:'text', editor:'select', options:['fuel','freshwater','lube','other'] },
     { key:'lcg', label:'LCG (m)', type:'number' },
     { key:'cap_m3', label:'Kapasite (m³)', type:'number' },
   ];

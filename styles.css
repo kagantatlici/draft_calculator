@@ -39,6 +39,8 @@ input[type=number] { background: #0f1014; color: var(--text); border: 1px solid 
 .tank input { width: 100%; }
 .tank-head { border-style: solid; background: rgba(255,255,255,0.03); }
 .tank-head .name, .tank-head .cap { color: var(--muted); font-weight: 600; }
+/* Center the % header cell */
+.tank-head > :nth-child(3) { text-align: center; }
 
 /* Compact on smaller screens */
 @media (max-width: 980px) { .tank { grid-template-columns: 100px 70px 50px 80px 60px 80px; } }
