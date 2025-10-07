@@ -890,7 +890,7 @@ async function openWizardForEdit() {
     setVal('wiz-rho', isFinite(s.rho_ref)? s.rho_ref : '');
     const le = document.getElementById('wiz-longref'); if (le) le.value = (s.long_ref||'ms_plus');
     if (s.light_ship && isFinite(s.light_ship.weight)) setVal('wiz-ls-w', s.light_ship.weight);
-    if (s.light_ship && isFinite(s.light_ship.lcg)) setVal('wiz-ls-x', s.light_ship.lcg);
+    if (s.light_ship && isFinite(s.light_ship.lcg)) setVal('wiz-ls-x', Number(s.light_ship.lcg).toFixed(3));
     if (s.constant && isFinite(s.constant.weight)) setVal('wiz-c-w', s.constant.weight);
     if (s.constant && isFinite(s.constant.lcg)) setVal('wiz-c-x', s.constant.lcg);
   } catch(_){}
