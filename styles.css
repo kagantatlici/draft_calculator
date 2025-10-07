@@ -27,7 +27,7 @@ h1 { font-size: 18px; margin: 0 0 4px 0; }
 h2 { font-size: 14px; margin: 0 0 8px 0; color: var(--accent); }
 
 label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 13px; }
-input[type=number] { background: #0f1014; color: var(--text); border: 1px solid var(--border); padding: 4px 6px; border-radius: 6px; }
+input[type=number], input[type=text] { background: #0f1014; color: var(--text); border: 1px solid var(--border); padding: 4px 6px; border-radius: 6px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
 .tank-list { display: grid; grid-template-columns: 1fr; gap: 6px; }

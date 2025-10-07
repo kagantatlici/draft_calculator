@@ -20,7 +20,7 @@
         <button id="add-ship" class="secondary">Add Ship</button>
         <button id="export-ships" class="secondary">Export Ships</button>
         <button id="import-ships" class="secondary">Import Ships</button>
-        <button id="edit-ship" class="secondary" style="background:#344154;">Edit</button>
+        <button id="edit-ship" class="secondary" style="background:#2b4330;">Edit</button>
         <input id="import-file" type="file" accept="application/json" style="display:none;" />
         <button id="delete-ship" class="secondary" style="background:#432b2b;">Delete Ship</button>
       </div>
@@ -32,7 +32,7 @@
         <div class="grid">
           <label>
             Seawater density ρ (t/m³)
-            <input id="rho" type="number" step="0.001" value="1.025" />
+            <input id="rho" type="text" inputmode="decimal" value="1.025" />
           </label>
           <label>
             Constant Weight (t)
@@ -149,6 +149,8 @@
             <label>Hydro Referans Yoğunluğu ρ_ref (t/m³)<input id="wiz-rho" type="number" step="0.001" placeholder="1.025" /></label>
             <label>Light Ship Weight (t)<input id="wiz-ls-w" type="number" step="0.1" placeholder="örn. 9070" /></label>
             <label>Light Ship L.C.G. (m)<input id="wiz-ls-x" type="number" step="0.01" placeholder="örn. -9.85" /></label>
+            <label>Constant Weight (t)<input id="wiz-c-w" type="number" step="0.1" placeholder="örn. 150" /></label>
+            <label>Constant L.C.G. (m)<input id="wiz-c-x" type="number" step="0.01" placeholder="örn. 0.00" /></label>
             <label>Longitudinal Datum
               <select id="wiz-longref">
                 <option value="ap_plus">AP (+ forward)</option>

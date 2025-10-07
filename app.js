@@ -286,7 +286,7 @@ function buildTankInputs(containerId, tanks) {
     wrap.appendChild(vInput);
 
     const rInput = document.createElement('input');
-    rInput.type = 'number'; rInput.step = '0.01'; rInput.id = `r_${t.id}`; rInput.placeholder = (containerId === 'ballast-tanks') ? '1.025' : '0.80'; rInput.setAttribute('aria-label','Yoğunluk');
+    rInput.type = 'text'; rInput.setAttribute('inputmode','decimal'); rInput.id = `r_${t.id}`; rInput.placeholder = (containerId === 'ballast-tanks') ? '1.025' : '0.80'; rInput.setAttribute('aria-label','Yoğunluk');
     rInput.dataset.col = 'rho'; rInput.dataset.row = String(rowIndex); rInput.dataset.container = containerId;
     wrap.appendChild(rInput);
 
@@ -299,15 +299,12 @@ function buildTankInputs(containerId, tanks) {
     const capVal = isFinite(Number(t.cap_m3)) ? Number(t.cap_m3) : 0;
     const sync = (changed) => {
       const cap = capVal;
-      // normalize decimal separator to dot
-      pInput.value = String(pInput.value||'').replace(',', '.');
-      vInput.value = String(vInput.value||'').replace(',', '.');
-      rInput.value = String(rInput.value||'').replace(',', '.');
-      wInput.value = String(wInput.value||'').replace(',', '.');
-      let P = parseFloat(pInput.value);
-      let V = parseFloat(vInput.value);
-      let R = parseFloat(rInput.value);
-      let W = parseFloat(wInput.value);
+      // read values with ',' normalized to '.' without mutating active field
+      const readNum = (el) => parseFloat(String(el.value||'').replace(',', '.'));
+      let P = readNum(pInput);
+      let V = readNum(vInput);
+      let R = readNum(rInput);
+      let W = readNum(wInput);
       P = isFinite(P) ? P : 0;
       V = isFinite(V) ? V : 0;
       // Do not coerce R; if NaN, we will skip dependent calcs
@@ -337,6 +334,9 @@ function buildTankInputs(containerId, tanks) {
     vInput.addEventListener('input', ()=> sync('vol'));
     rInput.addEventListener('input', ()=> sync('rho'));
     wInput.addEventListener('input', ()=> sync('w'));
+    // normalize to '.' only on change/blur to avoid caret jumps while typing
+    const norm = (el)=> el.value = String(el.value||'').replace(',', '.');
+    rInput.addEventListener('change', ()=> norm(rInput));
 
     // Column-wise Tab navigation: move focus to next/previous row within the same column
     const handleTabNav = (ev) => {
@@ -444,8 +444,9 @@ function wireConsumablesUI() {
 
 function calc() {
   const base = SHIP_ACTIVE || SHIP;
-  const rhoEl = el('rho'); if (rhoEl) rhoEl.value = String(rhoEl.value||'').replace(',', '.');
-  const rho = parseFloat(rhoEl?.value || String(base.RHO_REF || 1.025)) || (base.RHO_REF || 1.025);
+  const rhoEl = el('rho');
+  const rhoRaw = rhoEl ? String(rhoEl.value||'') : String(base.RHO_REF || 1.025);
+  const rho = parseFloat(rhoRaw.replace(',', '.')) || (base.RHO_REF || 1.025);
   // Read consumables groups as separate masses at their average LCGs
   if (!CONS_GROUPS || !CONS_GROUPS.fw) CONS_GROUPS = getConsGroupsFromTanks();
 
@@ -743,6 +744,9 @@ function populateShipDropdown(ships) {
     wireConsumablesUI();
     updateConstLCGHint();
   }
+  // Normalize decimal separator on rho change (do not mutate on each keypress)
+  const rhoEl = document.getElementById('rho');
+  if (rhoEl) rhoEl.addEventListener('change', ()=>{ rhoEl.value = String(rhoEl.value||'').replace(',', '.'); });
 })();
 
 el('calc').addEventListener('click', calc);
@@ -887,6 +891,8 @@ async function openWizardForEdit() {
     const le = document.getElementById('wiz-longref'); if (le) le.value = (s.long_ref||'ms_plus');
     if (s.light_ship && isFinite(s.light_ship.weight)) setVal('wiz-ls-w', s.light_ship.weight);
     if (s.light_ship && isFinite(s.light_ship.lcg)) setVal('wiz-ls-x', s.light_ship.lcg);
+    if (s.constant && isFinite(s.constant.weight)) setVal('wiz-c-w', s.constant.weight);
+    if (s.constant && isFinite(s.constant.lcg)) setVal('wiz-c-x', s.constant.lcg);
   } catch(_){}
   // Fill lists
   try { WIZ.hydro = Array.isArray(profMid.hydrostatics?.rows) ? profMid.hydrostatics.rows.slice() : []; } catch(_){}
