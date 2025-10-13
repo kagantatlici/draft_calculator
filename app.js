@@ -710,6 +710,8 @@ async function activateShip(id) {
     wireConsumablesUI();
     updateConstLCGHint();
   }
+  // After building inputs, if a stowage payload is pending, apply it now.
+  try { if (PENDING_STOWAGE_APPLY) { const tmp = PENDING_STOWAGE_APPLY; PENDING_STOWAGE_APPLY = null; applyStowagePayload(tmp); } } catch(_){ }
 }
 
 function populateShipDropdown(ships) {
@@ -828,6 +830,95 @@ let WIZ_LAST = { hydroText: '', cargoText: '', ballastText: '', consText: '' };
 let WIZ_BOUND = false;
 let OPEN_BUSY = false; // prevent multi-open race (Chrome double listeners, etc.)
 let WIZ_EDIT_MODE = false; // wizard opened for editing an existing ship
+
+// --- Integration: accept stowage planner payload via postMessage ---
+let PENDING_STOWAGE_APPLY = null;
+
+function normalizeCargoNameToId(name) {
+  if (!name) return null;
+  const s = String(name).toUpperCase().trim();
+  const mCot = /\bCOT\s*(\d+)\s*(P|S|C)\b/.exec(s);
+  if (mCot) return `COT${mCot[1]}${mCot[2]}`;
+  const mNo = /NO\.?\s*(\d+)\s*CARGO\s*TK\s*\((P|S|C)\)/.exec(s);
+  if (mNo) return `COT${mNo[1]}${mNo[2]}`;
+  if (/SLOP/.test(s)) {
+    const mSide = /(\(|\s)(P|S)(\)|\b)/.exec(s);
+    if (mSide && mSide[2]==='P') return 'SLOPP';
+    if (mSide && mSide[2]==='S') return 'SLOPS';
+  }
+  return null;
+}
+
+function buildCargoNormIndex() {
+  const map = new Map();
+  try {
+    for (const t of (ACTIVE && Array.isArray(ACTIVE.cargo) ? ACTIVE.cargo : [])) {
+      const norm = normalizeCargoNameToId(t.name || t.id || '');
+      if (norm) map.set(norm, t.id);
+    }
+  } catch(_) {}
+  return map;
+}
+
+function applyStowagePayload(pl) {
+  try {
+    if (!pl) return;
+    // General inputs
+    if (isFinite(pl.rho)) { const e = el('rho'); if (e) e.value = String(pl.rho); }
+    if (pl.constant) {
+      const cw = el('const_w'); const cx = el('const_x');
+      if (cw && isFinite(pl.constant.w)) cw.value = String(pl.constant.w);
+      if (cx && isFinite(pl.constant.x_midship_m)) {
+        // Convert from midship (+forward) to current display datum
+        const base = SHIP_ACTIVE || SHIP;
+        const xDisp = convertMidshipToRef(Number(pl.constant.x_midship_m), Number(base.LBP||SHIP.LBP), String(LONG_REF_ACTIVE||'ms_plus'));
+        cx.value = String(xDisp);
+      }
+    }
+    if (pl.consumables) {
+      const set = (id,val)=>{ const e=el(id); if (e && isFinite(val)) e.value = String(val); };
+      set('fo_w', pl.consumables.fo);
+      set('fw_w', pl.consumables.fw);
+      set('oth_w', pl.consumables.oth);
+    }
+    // Tanks: set weights per cargo tank
+    const normIdx = buildCargoNormIndex();
+    let missing = 0;
+    if (Array.isArray(pl.allocations)) {
+      for (const a of pl.allocations) {
+        const key = a && a.tank_id;
+        if (!key) continue;
+        const rowId = normIdx.get(String(key).toUpperCase());
+        if (!rowId) { missing++; continue; }
+        const wp = document.getElementById(`w_${rowId}`);
+        if (wp) wp.value = String(Number(a.weight_mt||0).toFixed(1)); else missing++;
+        // Optional: clear %/vol to keep UI consistent with weight-driven input
+        const pp = document.getElementById(`p_${rowId}`); if (pp) pp.value = '';
+        const vp = document.getElementById(`v_${rowId}`); if (vp) vp.value = '';
+      }
+    }
+    // Update totals and recompute
+    try { updateTankTotals('cargo-tanks', ACTIVE.cargo); } catch(_) {}
+    try { updateTankTotals('ballast-tanks', ACTIVE.ballast); } catch(_) {}
+    if (typeof wireConsumablesUI === 'function') wireConsumablesUI();
+    calc();
+    // If not all fields were present (UI not built yet), keep pending and retry
+    if (missing > 0) {
+      PENDING_STOWAGE_APPLY = pl;
+      setTimeout(()=>{ if (PENDING_STOWAGE_APPLY) { const tmp = PENDING_STOWAGE_APPLY; PENDING_STOWAGE_APPLY=null; applyStowagePayload(tmp); } }, 350);
+    }
+  } catch(_) { /* ignore */ }
+}
+
+window.addEventListener('message', (e) => {
+  try {
+    const data = e && e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'apply_stowage_plan' && data.payload) {
+      applyStowagePayload(data.payload);
+    }
+  } catch(_){ /* noop */ }
+});
 
 function showWizard() {
   const ov = document.getElementById('wizard-overlay');
