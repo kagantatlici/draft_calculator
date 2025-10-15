@@ -881,7 +881,7 @@ function applyStowagePayload(pl) {
       set('fw_w', pl.consumables.fw);
       set('oth_w', pl.consumables.oth);
     }
-    // Tanks: set weights per cargo tank
+    // Tanks: set weights, volume, percent, and density per cargo tank
     const normIdx = buildCargoNormIndex();
     let missing = 0;
     if (Array.isArray(pl.allocations)) {
@@ -891,10 +891,30 @@ function applyStowagePayload(pl) {
         const rowId = normIdx.get(String(key).toUpperCase());
         if (!rowId) { missing++; continue; }
         const wp = document.getElementById(`w_${rowId}`);
-        if (wp) wp.value = String(Number(a.weight_mt||0).toFixed(1)); else missing++;
-        // Optional: clear %/vol to keep UI consistent with weight-driven input
-        const pp = document.getElementById(`p_${rowId}`); if (pp) pp.value = '';
-        const vp = document.getElementById(`v_${rowId}`); if (vp) vp.value = '';
+        const vp = document.getElementById(`v_${rowId}`);
+        const pp = document.getElementById(`p_${rowId}`);
+        const rp = document.getElementById(`r_${rowId}`);
+        // Weight (t)
+        if (wp && isFinite(Number(a.weight_mt))) wp.value = String(Number(a.weight_mt).toFixed(1)); else missing++;
+        // Volume (m³)
+        if (vp && isFinite(Number(a.assigned_m3))) vp.value = String(Number(a.assigned_m3).toFixed(1));
+        // Percent (%) — accept either a.percent (0..100) or a.fill_pct (0..1)
+        let pct = undefined;
+        if (isFinite(Number(a.percent))) pct = Number(a.percent);
+        else if (isFinite(Number(a.fill_pct))) {
+          const f = Number(a.fill_pct);
+          pct = (f > 1 ? f : f * 100);
+        }
+        if (pp && isFinite(pct)) pp.value = String(Number(pct).toFixed(1));
+        // Density (t/m³ ≡ g/cm³ numerically)
+        let dens = undefined;
+        if (isFinite(Number(a.rho))) dens = Number(a.rho);
+        else {
+          const vol = Number(a.assigned_m3);
+          const wt = Number(a.weight_mt);
+          if (isFinite(vol) && vol > 0 && isFinite(wt) && wt > 0) dens = wt / vol;
+        }
+        if (rp && isFinite(dens) && dens > 0) rp.value = String(dens.toFixed(3));
       }
     }
     // Update totals and recompute
