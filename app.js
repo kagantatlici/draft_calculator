@@ -917,6 +917,21 @@ function applyStowagePayload(pl) {
         if (rp && isFinite(dens) && dens > 0) rp.value = String(dens.toFixed(3));
       }
     }
+    // Ballast allocations (optional)
+    if (Array.isArray(pl.ballast_allocations)) {
+      for (const b of pl.ballast_allocations) {
+        const id = b && b.tank_id;
+        if (!id) continue;
+        const wp = document.getElementById(`w_${id}`);
+        const vp = document.getElementById(`v_${id}`);
+        const pp = document.getElementById(`p_${id}`);
+        const rp = document.getElementById(`r_${id}`);
+        if (rp && isFinite(Number(b.rho))) rp.value = String(Number(b.rho));
+        if (vp && isFinite(Number(b.assigned_m3))) vp.value = String(Number(b.assigned_m3).toFixed(1));
+        if (pp && isFinite(Number(b.percent))) pp.value = String(Number(b.percent).toFixed(1));
+        if (wp && isFinite(Number(b.weight_mt))) wp.value = String(Number(b.weight_mt).toFixed(1)); else missing++;
+      }
+    }
     // Update totals and recompute
     try { updateTankTotals('cargo-tanks', ACTIVE.cargo); } catch(_) {}
     try { updateTankTotals('ballast-tanks', ACTIVE.ballast); } catch(_) {}
