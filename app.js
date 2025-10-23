@@ -951,6 +951,12 @@ window.addEventListener('message', (e) => {
     if (!data || typeof data !== 'object') return;
     if (data.type === 'apply_stowage_plan' && data.payload) {
       applyStowagePayload(data.payload);
+      return;
+    }
+    // Accept raw payloads directly (stowage planner may post payload without wrapper)
+    if (data && Array.isArray(data.allocations)) {
+      applyStowagePayload(data);
+      return;
     }
   } catch(_){ /* noop */ }
 });
