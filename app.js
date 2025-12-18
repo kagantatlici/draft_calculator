@@ -937,10 +937,14 @@ function applyStowagePayload(pl) {
     try { updateTankTotals('ballast-tanks', ACTIVE.ballast); } catch(_) {}
     if (typeof wireConsumablesUI === 'function') wireConsumablesUI();
     calc();
-    // If not all fields were present (UI not built yet), keep pending and retry
+    // If some fields were not present, do NOT keep re-applying forever (it prevents manual edits).
+    // Instead, only defer a single apply until a proper ship/profile UI is loaded (activateShip rebuilds the table).
     if (missing > 0) {
-      PENDING_STOWAGE_APPLY = pl;
-      setTimeout(()=>{ if (PENDING_STOWAGE_APPLY) { const tmp = PENDING_STOWAGE_APPLY; PENDING_STOWAGE_APPLY=null; applyStowagePayload(tmp); } }, 350);
+      const shouldDefer = (normIdx && typeof normIdx.size === 'number') ? (normIdx.size === 0) : false;
+      PENDING_STOWAGE_APPLY = shouldDefer ? pl : null;
+      try { console.warn(`[stowage] apply incomplete (missing=${missing}). ${shouldDefer ? 'Deferred until ship UI loads.' : 'Not retrying to allow manual edits.'}`); } catch(_){}
+    } else {
+      PENDING_STOWAGE_APPLY = null;
     }
   } catch(_) { /* ignore */ }
 }
